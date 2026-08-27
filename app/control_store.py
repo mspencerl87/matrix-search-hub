@@ -37,3 +37,13 @@ def get_user(conn, user_id: str):
     cur = conn.execute("SELECT user_id, device_id FROM users WHERE user_id=?", (user_id,))
     row = cur.fetchone()
     return {"user_id": row[0], "device_id": row[1]} if row else None
+
+
+def all_users(conn):
+    cur = conn.execute("SELECT user_id, device_id, created_at FROM users ORDER BY created_at DESC")
+    return [{"user_id": r[0], "device_id": r[1], "created_at": r[2]} for r in cur.fetchall()]
+
+
+def delete_user(conn, user_id: str):
+    conn.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+    conn.commit()

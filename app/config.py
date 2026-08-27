@@ -46,3 +46,12 @@ PRUNE_INTERVAL_SECONDS = int(os.environ.get("PRUNE_INTERVAL_SECONDS", str(24 * 3
 MIN_VAULT_PASSPHRASE_LENGTH = 12
 
 PENDING_TOKENS_TTL_SECONDS = 900  # time between OIDC callback and vault setup/unlock
+
+# Matrix user IDs (e.g. @spencer.leblanc:vates.tech) allowed to use the
+# admin panel. Empty by default - admin routes 403 for everyone until this
+# is set. Admins are just regular users who also appear here; there is no
+# separate admin credential, and admin access never grants the ability to
+# read anyone's messages or bypass their vault passphrase - only metadata
+# (who's registered, locked/unlocked, message counts) and the ability to
+# force-lock or deprovision an account.
+ADMIN_USER_IDS = {u.strip() for u in os.environ.get("ADMIN_USER_IDS", "").split(",") if u.strip()}

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import shutil
 import time
 
 from app import config, oidc, vault
@@ -50,6 +51,16 @@ class WorkerManager:
         if conn:
             conn.close()
         log.info("Locked vault for %s", user_id)
+
+    async def deprovision(self, user_id: str):
+        """Irreversibly wipes a user's vault and Matrix crypto store. Locks
+        them out first so nothing is writing to the files while removing
+        them. Used for offboarding - there's no undo."""
+        await self.lock_user(user_id)
+        d = user_dir(user_id)
+        if os.path.isdir(d):
+            shutil.rmtree(d)
+        log.info("Deprovisioned %s (deleted %s)", user_id, d)
 
     async def _run_worker(self, user_id: str, indexer: UserIndexer):
         refresh_task = asyncio.create_task(self._refresh_loop(user_id, indexer))

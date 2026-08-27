@@ -40,6 +40,17 @@ def require_user(request: Request) -> str:
     return user_id
 
 
+def is_admin(user_id: str) -> bool:
+    return user_id in config.ADMIN_USER_IDS
+
+
+def require_admin(request: Request) -> str:
+    user_id = require_user(request)
+    if not is_admin(user_id):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user_id
+
+
 def store_pending_login(state: str, code_verifier: str, device_id: str) -> None:
     with _pending_lock:
         _prune_pending()

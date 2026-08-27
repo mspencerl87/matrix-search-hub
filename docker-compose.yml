@@ -12,6 +12,7 @@ services:
       MATRIX_DEVICE_NAME: ${MATRIX_DEVICE_NAME:-matrix-search-hub}
       ELEMENT_URL: ${ELEMENT_URL:-https://app.element.io}
       RETENTION_MONTHS: ${RETENTION_MONTHS:-12}
+      ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
       OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:-}
       OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET:-}
     restart: unless-stopped

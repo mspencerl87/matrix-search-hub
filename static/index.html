@@ -126,6 +126,7 @@
     <h1>Matrix Search</h1>
     <div class="account">
       <span id="whoami"></span>
+      <a href="/admin.html" id="adminLink" hidden>Admin</a>
       <button class="link" id="lockBtn">Lock</button>
       <a href="/auth/logout">Log out</a>
     </div>
@@ -194,6 +195,7 @@ async function init() {
   } catch (e) { showScreen('signin'); return; }
 
   whoamiEl.textContent = me.user_id;
+  if (me.is_admin) document.getElementById('adminLink').hidden = false;
 
   let vs;
   try {

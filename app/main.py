@@ -155,7 +155,7 @@ async def api_me(request: Request):
     user_id = auth.read_session_user_id(request)
     if not user_id:
         return JSONResponse({"logged_in": False}, status_code=401)
-    return {"logged_in": True, "user_id": user_id}
+    return {"logged_in": True, "user_id": user_id, "is_admin": auth.is_admin(user_id)}
 
 
 @app.get("/api/vault-status")
@@ -301,6 +301,68 @@ async def api_import_keys(request: Request, file: UploadFile = File(...), passph
 
     asyncio.create_task(indexer.resync_history())
     return {"status": "importing", "detail": "Re-scanning your history in the background - check back shortly."}
+
+
+@app.get("/api/admin/overview")
+async def api_admin_overview(request: Request):
+    auth.require_admin(request)
+    return {
+        "homeserver": config.HOMESERVER,
+        "base_url": config.BASE_URL,
+        "retention_months": config.RETENTION_MONTHS,
+        "search_range_options_months": list(config.SEARCH_RANGE_OPTIONS_MONTHS),
+        "oauth_client_id": app_state["client_id"],
+        "oauth_client_is_static": bool(config.STATIC_CLIENT_ID),
+        "oidc_issuer": app_state["discovery"].get("issuer"),
+    }
+
+
+@app.get("/api/admin/users")
+async def api_admin_users(request: Request):
+    auth.require_admin(request)
+    manager: WorkerManager = app_state["manager"]
+    rows = []
+    for u in control_store.all_users(app_state["control_conn"]):
+        unlocked = manager.is_unlocked(u["user_id"])
+        stats = get_stats(manager.vault_conns[u["user_id"]]) if unlocked else None
+        rows.append(
+            {
+                "user_id": u["user_id"],
+                "device_id": u["device_id"],
+                "created_at": u["created_at"],
+                "vault_exists": vault.exists(u["user_id"]),
+                "unlocked": unlocked,
+                "stats": stats,
+            }
+        )
+    return {"users": rows}
+
+
+def _known_admin_target(user_id: str) -> None:
+    """Guards destructive/forceful admin actions to user_ids that actually
+    exist in the registry - both so a typo 404s cleanly, and so a crafted
+    path segment (e.g. "..") can never reach outside the users directory."""
+    if not control_store.get_user(app_state["control_conn"], user_id):
+        raise HTTPException(status_code=404, detail="unknown user")
+
+
+@app.post("/api/admin/users/{user_id}/lock")
+async def api_admin_lock_user(request: Request, user_id: str):
+    auth.require_admin(request)
+    _known_admin_target(user_id)
+    manager: WorkerManager = app_state["manager"]
+    await manager.lock_user(user_id)
+    return {"status": "locked"}
+
+
+@app.post("/api/admin/users/{user_id}/deprovision")
+async def api_admin_deprovision(request: Request, user_id: str):
+    auth.require_admin(request)
+    _known_admin_target(user_id)
+    manager: WorkerManager = app_state["manager"]
+    await manager.deprovision(user_id)
+    control_store.delete_user(app_state["control_conn"], user_id)
+    return {"status": "deprovisioned"}
 
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

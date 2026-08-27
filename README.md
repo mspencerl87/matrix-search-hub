@@ -136,7 +136,8 @@ not, is less exposure if anything ever does go wrong.
    everyone out (their vaults are unaffected, they just need to unlock
    again).
 
-5. Optionally adjust `RETENTION_MONTHS` (default `12`).
+5. Optionally adjust `RETENTION_MONTHS` (default `12`) and set
+   `ADMIN_USER_IDS` (comma-separated) if anyone should have admin access.
 
 6. Build and start:
 
@@ -174,6 +175,29 @@ encrypted (E2EE) rooms yet. From the search UI:
 Unencrypted rooms need none of this - they index automatically for
 everyone.
 
+## Admin panel
+
+Anyone whose Matrix user ID is listed in `ADMIN_USER_IDS` sees an **Admin**
+link in the search UI, leading to `/admin.html`. It shows, and only shows,
+metadata:
+
+- Deployment overview: homeserver, base URL, OIDC issuer, OAuth client,
+  retention setting.
+- A table of every user who's ever signed in: their device ID, whether
+  they've set up a vault, whether it's currently unlocked, and (only while
+  unlocked) their indexed message/room *counts* - never content.
+- **Lock** - force-evicts a user's key from server memory right now,
+  without deleting anything. Useful for incident response (e.g. a stolen
+  laptop with an active session) without touching their data.
+- **Deprovision** - permanently deletes a user's vault, indexed messages,
+  and Matrix crypto store. Requires typing their user ID to confirm; there
+  is no undo. Use this for offboarding.
+
+There is deliberately no way for an admin to read a user's messages or
+open their vault without their passphrase - that would defeat the entire
+point of the encryption model above. Admin here means "can manage
+accounts," not "can read anyone's data."
+
 ## Data & security notes
 
 - `data/users/<user>/vault.db` holds that user's decrypted messages and
@@ -188,13 +212,13 @@ everyone.
   still unlocked in server memory, the background sync worker keeps
   running so the index stays current. Use **Lock** (or a restart) to
   actually evict a user's key from memory.
-- To fully deprovision someone who's left the company: remove their row
-  from `data/control.db` and delete their directory under
-  `data/users/` - there's no admin UI for this yet, it's a manual step.
+- To fully deprovision someone who's left the company, use the admin
+  panel's **Deprovision** button (or the API below) rather than deleting
+  files by hand - it makes sure their sync worker is stopped first.
 
 ## API
 
-- `GET /api/me` — current session's user_id, or 401.
+- `GET /api/me` — current session's user_id and is_admin, or 401.
 - `GET /api/vault-status` — `{exists, unlocked, has_pending_login}` for
   the logged-in user.
 - `POST /api/vault/setup` — `{passphrase}`, first-time vault creation.
@@ -206,3 +230,6 @@ everyone.
 - `GET /api/status` — indexed message/room counts; 423 if locked.
 - `POST /api/import-keys` — multipart `file` + `passphrase`, imports a
   Matrix room-key export and triggers a background re-scan.
+- `GET /api/admin/overview`, `GET /api/admin/users` — admin-only, metadata
+  as described above.
+- `POST /api/admin/users/{user_id}/lock`, `POST /api/admin/users/{user_id}/deprovision` — admin-only.

@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Matrix Search - Admin</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #15171b;
+    --panel: #1e2027;
+    --border: #2e3038;
+    --text: #e3e3e8;
+    --muted: #9092a0;
+    --accent: #0dbd8b;
+    --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  header { padding: 24px 16px 12px; max-width: 960px; margin: 0 auto; display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+  h1 { font-size: 1.3rem; margin: 0; }
+  header a { color: var(--accent); text-decoration: none; font-size: 0.85rem; }
+  main { max-width: 960px; margin: 0 auto; padding: 0 16px 40px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 20px; }
+  .panel h2 { font-size: 1rem; margin: 0 0 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; font-size: 0.85rem; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; word-break: break-all; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; }
+  .pill.on { background: #0dbd8b33; color: var(--accent); }
+  .pill.off { background: #ffffff14; color: var(--muted); }
+  .pill.none { background: #ffffff0a; color: var(--muted); }
+  button { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; font-size: 0.8rem; margin-right: 6px; }
+  button:hover { border-color: var(--accent); }
+  button.danger:hover { border-color: var(--danger); color: var(--danger); }
+  .empty { color: var(--muted); padding: 30px 0; text-align: center; }
+  .denied { color: var(--muted); padding: 60px 20px; text-align: center; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Admin</h1>
+  <a href="/">&larr; Back to search</a>
+</header>
+
+<main>
+  <div id="denied" class="denied" hidden>You don't have admin access.</div>
+
+  <div id="content" hidden>
+    <div class="panel">
+      <h2>Overview</h2>
+      <dl class="kv" id="overview"></dl>
+    </div>
+
+    <div class="panel">
+      <h2>Users</h2>
+      <table>
+        <thead>
+          <tr><th>User</th><th>Vault</th><th>Status</th><th>Indexed</th><th>Since</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="usersBody"></tbody>
+      </table>
+      <div id="usersEmpty" class="empty" hidden>No users have signed in yet.</div>
+    </div>
+  </div>
+</main>
+
+<script>
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function init() {
+  try {
+    const r = await fetch('/api/admin/overview');
+    if (r.status === 403 || r.status === 401) {
+      document.getElementById('denied').hidden = false;
+      return;
+    }
+    const j = await r.json();
+    renderOverview(j);
+    document.getElementById('content').hidden = false;
+    await loadUsers();
+  } catch (e) {
+    document.getElementById('denied').hidden = false;
+  }
+}
+
+function renderOverview(j) {
+  const el = document.getElementById('overview');
+  el.innerHTML = `
+    <dt>Homeserver</dt><dd>${escapeHtml(j.homeserver)}</dd>
+    <dt>Base URL</dt><dd>${escapeHtml(j.base_url)}</dd>
+    <dt>OIDC issuer</dt><dd>${escapeHtml(j.oidc_issuer || '-')}</dd>
+    <dt>OAuth client</dt><dd>${escapeHtml(j.oauth_client_id)} ${j.oauth_client_is_static ? '(static)' : '(self-registered)'}</dd>
+    <dt>Retention</dt><dd>${j.retention_months} month(s)</dd>
+    <dt>Search range options</dt><dd>${j.search_range_options_months.join(', ')} month(s)</dd>
+  `;
+}
+
+async function loadUsers() {
+  const r = await fetch('/api/admin/users');
+  const j = await r.json();
+  const body = document.getElementById('usersBody');
+  const empty = document.getElementById('usersEmpty');
+  if (!j.users.length) {
+    body.innerHTML = '';
+    empty.hidden = false;
+    return;
+  }
+  empty.hidden = true;
+  body.innerHTML = j.users.map(renderRow).join('');
+
+  body.querySelectorAll('button[data-lock]').forEach(btn => {
+    btn.addEventListener('click', () => lockUser(btn.getAttribute('data-lock')));
+  });
+  body.querySelectorAll('button[data-deprovision]').forEach(btn => {
+    btn.addEventListener('click', () => deprovisionUser(btn.getAttribute('data-deprovision')));
+  });
+}
+
+function renderRow(u) {
+  const vaultPill = u.vault_exists ? '<span class="pill on">set up</span>' : '<span class="pill none">not set up</span>';
+  const statusPill = u.unlocked ? '<span class="pill on">unlocked</span>' : '<span class="pill off">locked</span>';
+  const indexed = u.stats ? `${u.stats.indexed_messages} msgs / ${u.stats.rooms} rooms` : '-';
+  const since = new Date(u.created_at * 1000).toLocaleDateString();
+  const lockBtn = u.unlocked ? `<button data-lock="${escapeHtml(u.user_id)}">Lock</button>` : '';
+  return `<tr>
+    <td>${escapeHtml(u.user_id)}<br><span style="color:var(--muted);font-size:0.75rem">${escapeHtml(u.device_id)}</span></td>
+    <td>${vaultPill}</td>
+    <td>${statusPill}</td>
+    <td>${indexed}</td>
+    <td>${since}</td>
+    <td>${lockBtn}<button class="danger" data-deprovision="${escapeHtml(u.user_id)}">Deprovision</button></td>
+  </tr>`;
+}
+
+async function lockUser(userId) {
+  await fetch(`/api/admin/users/${encodeURIComponent(userId)}/lock`, { method: 'POST' });
+  await loadUsers();
+}
+
+async function deprovisionUser(userId) {
+  const typed = prompt(
+    `This permanently deletes ${userId}'s vault, indexed messages, and Matrix crypto store. ` +
+    `There is no undo. Type the user ID to confirm:`
+  );
+  if (typed !== userId) return;
+  await fetch(`/api/admin/users/${encodeURIComponent(userId)}/deprovision`, { method: 'POST' });
+  await loadUsers();
+}
+
+init();
+</script>
+</body>
+</html>
