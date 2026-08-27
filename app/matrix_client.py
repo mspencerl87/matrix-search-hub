@@ -61,18 +61,36 @@ class UserIndexer:
     async def _on_message(self, room: MatrixRoom, event: RoomMessageText):
         cutoff = self._cutoff_ts_ms()
         if cutoff and event.server_timestamp < cutoff:
+            log.info(
+                "[%s] SKIP (older than retention cutoff) event %s in room %s (%s)",
+                self.user_id, event.event_id, room.room_id, room.display_name,
+            )
             return
+        log.info(
+            "[%s] indexing event %s in room %s (%s): %r",
+            self.user_id, event.event_id, room.room_id, room.display_name, event.body[:60],
+        )
         add_message(
             self.conn, event.event_id, room.room_id, room.display_name, event.sender, event.body, event.server_timestamp
         )
 
     async def _on_undecryptable(self, room: MatrixRoom, event: MegolmEvent):
+        log.info(
+            "[%s] UNDECRYPTABLE event %s in room %s (%s)",
+            self.user_id, event.event_id, room.room_id, room.display_name,
+        )
         self._undecryptable += 1
 
     async def _on_sync(self, response: SyncResponse):
         for room_id, room_info in response.rooms.join.items():
             if room_info.timeline.prev_batch:
                 self._prev_batches[room_id] = room_info.timeline.prev_batch
+            else:
+                log.warning("[%s] room %s has no prev_batch in this sync response", self.user_id, room_id)
+            log.info(
+                "[%s] sync timeline for %s: %d event(s), limited=%s",
+                self.user_id, room_id, len(room_info.timeline.events), room_info.timeline.limited,
+            )
 
     async def run(self):
         asyncio.create_task(self._prune_loop())
