@@ -84,6 +84,25 @@ def open_vault(user_id: str, passphrase: str):
     return conn
 
 
+def verify_passphrase(user_id: str, passphrase: str) -> bool:
+    """Checks a passphrase against an existing vault without disturbing any
+    already-open connection to it (used to confirm a passphrase-change
+    request before rekeying the live connection)."""
+    try:
+        conn = open_vault(user_id, passphrase)
+    except WrongPassphrase:
+        return False
+    conn.close()
+    return True
+
+
+def change_passphrase(conn, new_passphrase: str) -> None:
+    """Rekeys an already-open vault connection in place. Caller must verify
+    the current passphrase first - this itself doesn't check anything."""
+    escaped = new_passphrase.replace("'", "''")
+    conn.execute(f"PRAGMA rekey = '{escaped}'")
+
+
 def get_oauth(conn):
     cur = conn.execute("SELECT device_id, access_token, refresh_token, expires_at FROM oauth WHERE id = 1")
     row = cur.fetchone()

@@ -61,11 +61,18 @@
       <h2>Users</h2>
       <table>
         <thead>
-          <tr><th>User</th><th>Vault</th><th>Status</th><th>Indexed</th><th>Since</th><th>Actions</th></tr>
+          <tr><th>User</th><th>Vault</th><th>Status</th><th>Indexed</th><th>Sync health</th><th>Since</th><th>Actions</th></tr>
         </thead>
         <tbody id="usersBody"></tbody>
       </table>
       <div id="usersEmpty" class="empty" hidden>No users have signed in yet.</div>
+      <p style="color:var(--muted); font-size:0.78rem; margin-top:12px;">
+        Forgot passphrase / locked out? There's no way to reset a passphrase
+        without knowing the current one - use <strong>Deprovision</strong>
+        so they can set up a fresh vault. <strong>Clear index</strong> only
+        wipes their search data (not their vault or Matrix session) and
+        needs their vault to be currently unlocked.
+      </p>
     </div>
   </div>
 </main>
@@ -119,9 +126,34 @@ async function loadUsers() {
   body.querySelectorAll('button[data-lock]').forEach(btn => {
     btn.addEventListener('click', () => lockUser(btn.getAttribute('data-lock')));
   });
+  body.querySelectorAll('button[data-clear]').forEach(btn => {
+    btn.addEventListener('click', () => clearIndex(btn.getAttribute('data-clear')));
+  });
   body.querySelectorAll('button[data-deprovision]').forEach(btn => {
     btn.addEventListener('click', () => deprovisionUser(btn.getAttribute('data-deprovision')));
   });
+}
+
+function relativeTime(ts) {
+  if (!ts) return 'never';
+  const seconds = Math.max(0, (Date.now() / 1000) - ts);
+  if (seconds < 90) return 'just now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
+function renderHealth(health) {
+  if (!health) return '-';
+  const synced = `synced ${relativeTime(health.last_sync_success_at)}`;
+  const undecryptable = health.undecryptable
+    ? `<br><span style="color:var(--muted);font-size:0.75rem">${health.undecryptable} undecryptable</span>` : '';
+  const error = health.last_error
+    ? `<br><span style="color:var(--danger);font-size:0.75rem" title="${escapeHtml(health.last_error)}">error: ${escapeHtml(health.last_error.slice(0, 40))}${health.last_error.length > 40 ? '...' : ''}</span>`
+    : '';
+  return `${synced}${undecryptable}${error}`;
 }
 
 function renderRow(u) {
@@ -130,18 +162,28 @@ function renderRow(u) {
   const indexed = u.stats ? `${u.stats.indexed_messages} msgs / ${u.stats.rooms} rooms` : '-';
   const since = new Date(u.created_at * 1000).toLocaleDateString();
   const lockBtn = u.unlocked ? `<button data-lock="${escapeHtml(u.user_id)}">Lock</button>` : '';
+  const clearBtn = u.unlocked ? `<button data-clear="${escapeHtml(u.user_id)}">Clear index</button>` : '';
   return `<tr>
     <td>${escapeHtml(u.user_id)}<br><span style="color:var(--muted);font-size:0.75rem">${escapeHtml(u.device_id)}</span></td>
     <td>${vaultPill}</td>
     <td>${statusPill}</td>
     <td>${indexed}</td>
+    <td>${renderHealth(u.health)}</td>
     <td>${since}</td>
-    <td>${lockBtn}<button class="danger" data-deprovision="${escapeHtml(u.user_id)}">Deprovision</button></td>
+    <td>${lockBtn}${clearBtn}<button class="danger" data-deprovision="${escapeHtml(u.user_id)}">Deprovision</button></td>
   </tr>`;
 }
 
 async function lockUser(userId) {
   await fetch(`/api/admin/users/${encodeURIComponent(userId)}/lock`, { method: 'POST' });
+  await loadUsers();
+}
+
+async function clearIndex(userId) {
+  if (!confirm(`Clear ${userId}'s search index? Their vault and Matrix session stay intact; a resync starts automatically afterward.`)) return;
+  const r = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/clear-index`, { method: 'POST' });
+  const j = await r.json();
+  if (!r.ok) alert(j.error || 'Clear failed.');
   await loadUsers();
 }
 

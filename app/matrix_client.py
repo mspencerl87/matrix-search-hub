@@ -36,6 +36,9 @@ class UserIndexer:
         self._prev_batches: dict[str, str] = {}
         self._undecryptable = 0
         self._stop = False
+        self.last_sync_attempt_at: float | None = None
+        self.last_sync_success_at: float | None = None
+        self.last_error: str | None = None
 
         os.makedirs(store_path, exist_ok=True)
         client_config = AsyncClientConfig(store_sync_tokens=True, encryption_enabled=True)
@@ -99,9 +102,22 @@ class UserIndexer:
         while not self._stop:
             try:
                 await self.client.sync_forever(timeout=30000, full_state=False)
-            except Exception:
+            except Exception as e:
+                # sync_forever loops internally and only returns/raises on a
+                # real failure or cancellation - a healthy long-running sync
+                # never reaches this line at all, so this only ever reflects
+                # a genuine crash, not routine idle polling.
+                self.last_error = f"sync_forever crashed: {e}"
                 log.exception("[%s] sync_forever crashed, retrying in 10s", self.user_id)
                 await asyncio.sleep(10)
+
+    def health(self) -> dict:
+        return {
+            "last_sync_attempt_at": self.last_sync_attempt_at,
+            "last_sync_success_at": self.last_sync_success_at,
+            "last_error": self.last_error,
+            "undecryptable": self._undecryptable,
+        }
 
     async def _prune_loop(self):
         while not self._stop:
@@ -119,13 +135,14 @@ class UserIndexer:
         """Full sync + backfill of every joined room. Safe to call repeatedly
         (e.g. after a key import) since inserts are idempotent on event_id."""
         log.info("[%s] performing full sync...", self.user_id)
+        self.last_sync_attempt_at = time.time()
         resp = await self.client.sync(timeout=30000, full_state=True)
         if isinstance(resp, SyncError):
-            log.error(
-                "[%s] full sync failed (status=%s): %s - skipping this resync attempt",
-                self.user_id, getattr(resp, "status_code", "?"), resp,
-            )
+            self.last_error = f"full sync failed (status={getattr(resp, 'status_code', '?')}): {resp}"
+            log.error("[%s] %s - skipping this resync attempt", self.user_id, self.last_error)
             return
+        self.last_sync_success_at = time.time()
+        self.last_error = None
         log.info("[%s] sync complete, %d rooms joined", self.user_id, len(self.client.rooms))
 
         # Iterate every currently-known joined room (from the client's local

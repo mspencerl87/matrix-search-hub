@@ -94,6 +94,11 @@ both:
   index is gone.
 - Users can also click **Lock** to proactively evict their key from server
   memory before walking away from a shared or untrusted machine.
+- Users can change their own passphrase from the search UI ("Change your
+  vault passphrase" panel) - this requires their *current* passphrase and
+  rekeys the vault in place with no data loss. This is different from a
+  forgotten passphrase, which nobody, including an admin, can recover or
+  reset (see the Admin panel section).
 
 ## Search range & retention
 
@@ -269,19 +274,32 @@ metadata:
 - Deployment overview: homeserver, base URL, OIDC issuer, OAuth client,
   retention setting.
 - A table of every user who's ever signed in: their device ID, whether
-  they've set up a vault, whether it's currently unlocked, and (only while
-  unlocked) their indexed message/room *counts* - never content.
+  they've set up a vault, whether it's currently unlocked, indexed
+  message/room *counts* (only while unlocked, never content), and sync
+  health - when their sync last actually succeeded, how many events
+  couldn't be decrypted, and the last error if there's one currently.
 - **Lock** - force-evicts a user's key from server memory right now,
   without deleting anything. Useful for incident response (e.g. a stolen
   laptop with an active session) without touching their data.
+- **Clear index** - wipes a user's search data only (their vault and
+  Matrix session/tokens are untouched) and starts a fresh resync
+  automatically. Only available while their vault is unlocked, since
+  clearing it means writing to their encrypted database. Useful when
+  someone's search seems stuck or wrong and a resync alone (self-service,
+  via the "Resync now" button they have themselves) doesn't fix it.
 - **Deprovision** - permanently deletes a user's vault, indexed messages,
   and Matrix crypto store. Requires typing their user ID to confirm; there
-  is no undo. Use this for offboarding.
+  is no undo. Use this for offboarding, **and** for a forgotten passphrase -
+  there is no way to reset or recover a passphrase without knowing the
+  current one (see below), so starting over is the only option.
 
 There is deliberately no way for an admin to read a user's messages or
 open their vault without their passphrase - that would defeat the entire
 point of the encryption model above. Admin here means "can manage
-accounts," not "can read anyone's data."
+accounts," not "can read anyone's data." This is also why there's no
+"reset passphrase" action: changing an encryption key requires already
+knowing the current one, so the only two real options for a locked-out
+user are (a) they remember it, or (b) Deprovision and start fresh.
 
 ## Data & security notes
 
@@ -309,10 +327,16 @@ accounts," not "can read anyone's data."
 - `POST /api/vault/setup` — `{passphrase}`, first-time vault creation.
 - `POST /api/vault/unlock` — `{passphrase}`, resumes an existing vault.
 - `POST /api/vault/lock` — evicts the key from memory, stops syncing.
+- `POST /api/vault/change-passphrase` — `{current_passphrase,
+  new_passphrase}`, rekeys the vault in place; 401 if the current
+  passphrase is wrong.
 - `GET /api/config` — search range options and retention, for the UI.
-- `GET /api/search?q=...&limit=50&months=1&sort=relevance` — search
-  results for the logged-in user's unlocked vault only; 423 if locked.
-  `sort` is one of `relevance` (default), `newest`, or `oldest`.
+- `GET /api/rooms` — distinct `{room_id, room_name}` pairs the logged-in
+  user has indexed messages from, for the search UI's room filter.
+- `GET /api/search?q=...&limit=50&months=1&sort=relevance&room_id=...` —
+  search results for the logged-in user's unlocked vault only; 423 if
+  locked. `sort` is one of `relevance` (default), `newest`, or `oldest`;
+  `room_id` (optional) restricts to one room.
 - `GET /api/status` — indexed message/room counts; 423 if locked.
 - `POST /api/resync` — re-runs a full sync + backfill in the background
   for the logged-in user, without needing a key import. Useful if you
@@ -321,5 +345,7 @@ accounts," not "can read anyone's data."
   Matrix room-key export and triggers the same background re-scan as
   `/api/resync`.
 - `GET /api/admin/overview`, `GET /api/admin/users` — admin-only, metadata
-  as described above.
-- `POST /api/admin/users/{user_id}/lock`, `POST /api/admin/users/{user_id}/deprovision` — admin-only.
+  as described above (the latter includes each user's sync health).
+- `POST /api/admin/users/{user_id}/lock`,
+  `POST /api/admin/users/{user_id}/clear-index` (409 if that user is
+  locked), `POST /api/admin/users/{user_id}/deprovision` — admin-only.

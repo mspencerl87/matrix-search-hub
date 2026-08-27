@@ -53,6 +53,21 @@ def get_stats(conn):
     return {"indexed_messages": total, "rooms": rooms}
 
 
+def list_rooms(conn):
+    cur = conn.execute(
+        "SELECT room_id, MAX(room_name) AS room_name FROM messages GROUP BY room_id ORDER BY room_name COLLATE NOCASE"
+    )
+    return [{"room_id": r[0], "room_name": r[1] or r[0]} for r in cur.fetchall()]
+
+
+def clear_all(conn):
+    """Wipes the message index (and, via the delete trigger, its FTS index)
+    without touching the oauth table - a resync afterward rebuilds it."""
+    cur = conn.execute("DELETE FROM messages")
+    conn.commit()
+    return cur.rowcount
+
+
 def prune_older_than(conn, cutoff_ts_ms: int):
     cur = conn.execute("DELETE FROM messages WHERE origin_server_ts < ?", (cutoff_ts_ms,))
     conn.commit()

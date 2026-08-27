@@ -134,6 +134,7 @@
   </div>
   <div class="searchbar">
     <input id="q" type="text" placeholder="Search your message history..." autofocus>
+    <select id="roomFilter"><option value="">All rooms</option></select>
     <select id="range"></select>
     <select id="sort">
       <option value="relevance">Best match</option>
@@ -162,6 +163,17 @@
     </div>
     <div id="keysMsg"></div>
   </details>
+
+  <details class="keys">
+    <summary>Change your vault passphrase</summary>
+    <form id="passphraseForm">
+      <input type="password" id="currentPass" placeholder="Current passphrase" required>
+      <input type="password" id="newPass" placeholder="New passphrase (12+ characters)" required minlength="12">
+      <input type="password" id="newPassConfirm" placeholder="Confirm new passphrase" required minlength="12">
+      <button type="submit">Change passphrase</button>
+    </form>
+    <div id="passphraseMsg"></div>
+  </details>
 </header>
 <main>
   <div id="results" class="empty">Type something and hit search.</div>
@@ -184,6 +196,7 @@ const q = document.getElementById('q');
 const go = document.getElementById('go');
 const rangeSelect = document.getElementById('range');
 const sortSelect = document.getElementById('sort');
+const roomFilterSelect = document.getElementById('roomFilter');
 const resyncBtn = document.getElementById('resyncBtn');
 const resyncMsg = document.getElementById('resyncMsg');
 const results = document.getElementById('results');
@@ -231,6 +244,7 @@ async function init() {
 async function enterApp() {
   showScreen('app');
   await loadRangeOptions();
+  await loadRooms();
   loadStatus();
   setInterval(loadStatus, 15000);
 }
@@ -244,6 +258,17 @@ async function loadRangeOptions() {
     ).join('');
   } catch (e) {
     rangeSelect.innerHTML = '<option value="1">1 month</option>';
+  }
+}
+
+async function loadRooms() {
+  try {
+    const r = await fetch('/api/rooms');
+    const j = await r.json();
+    const options = j.rooms.map(room => `<option value="${escapeHtml(room.room_id)}">${escapeHtml(room.room_name)}</option>`).join('');
+    roomFilterSelect.innerHTML = '<option value="">All rooms</option>' + options;
+  } catch (e) {
+    // leave just "All rooms" if this fails
   }
 }
 
@@ -265,7 +290,8 @@ async function doSearch() {
   try {
     const months = rangeSelect.value || 1;
     const sort = sortSelect.value || 'relevance';
-    const r = await fetch(`/api/search?q=${encodeURIComponent(query)}&months=${months}&sort=${sort}`);
+    const roomId = roomFilterSelect.value || '';
+    const r = await fetch(`/api/search?q=${encodeURIComponent(query)}&months=${months}&sort=${sort}&room_id=${encodeURIComponent(roomId)}`);
     if (r.status === 401) { location.reload(); return; }
     if (r.status === 423) { showScreen('vaultUnlock'); return; }
     const j = await r.json();
@@ -366,6 +392,28 @@ keysForm.addEventListener('submit', async (e) => {
     keysMsg.textContent = r.ok ? (j.detail || 'Imported.') : (j.error || j.detail || 'Import failed.');
   } catch (e) {
     keysMsg.textContent = 'Import failed.';
+  }
+});
+
+document.getElementById('passphraseForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const current = document.getElementById('currentPass').value;
+  const next = document.getElementById('newPass').value;
+  const confirm = document.getElementById('newPassConfirm').value;
+  const msgEl = document.getElementById('passphraseMsg');
+  msgEl.textContent = '';
+  if (next !== confirm) { msgEl.textContent = "New passphrases don't match."; return; }
+  try {
+    const r = await fetch('/api/vault/change-passphrase', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current_passphrase: current, new_passphrase: next }),
+    });
+    const j = await r.json();
+    msgEl.textContent = r.ok ? 'Passphrase changed.' : (j.error || 'Change failed.');
+    if (r.ok) e.target.reset();
+  } catch (e) {
+    msgEl.textContent = 'Change failed.';
   }
 });
 

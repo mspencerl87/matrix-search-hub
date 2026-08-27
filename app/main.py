@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app import auth, config, control_store, oidc, vault
-from app.search_index import SORT_ORDERS, get_stats, search
+from app.search_index import SORT_ORDERS, clear_all, get_stats, list_rooms, search
 from app.worker_manager import WorkerManager, user_dir
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -28,6 +28,11 @@ app_state: dict = {}
 
 class PassphraseBody(BaseModel):
     passphrase: str
+
+
+class ChangePassphraseBody(BaseModel):
+    current_passphrase: str
+    new_passphrase: str
 
 
 @app.on_event("startup")
@@ -241,6 +246,23 @@ async def api_vault_lock(request: Request):
     return {"status": "locked"}
 
 
+@app.post("/api/vault/change-passphrase")
+async def api_change_passphrase(request: Request, body: ChangePassphraseBody):
+    user_id, manager = _require_unlocked(request)
+    if len(body.new_passphrase) < config.MIN_VAULT_PASSPHRASE_LENGTH:
+        return JSONResponse(
+            {"error": f"new passphrase must be at least {config.MIN_VAULT_PASSPHRASE_LENGTH} characters"},
+            status_code=400,
+        )
+    if not vault.verify_passphrase(user_id, body.current_passphrase):
+        return JSONResponse({"error": "current passphrase is incorrect"}, status_code=401)
+
+    conn = manager.vault_conns[user_id]
+    vault.change_passphrase(conn, body.new_passphrase)
+    conn.commit()
+    return {"status": "changed"}
+
+
 @app.get("/api/config")
 async def api_config():
     allowed = [m for m in config.SEARCH_RANGE_OPTIONS_MONTHS if m <= config.RETENTION_MONTHS]
@@ -262,6 +284,13 @@ def _locked_error():
     return HTTPException(status_code=423, detail="vault is locked, unlock it first")
 
 
+@app.get("/api/rooms")
+async def api_rooms(request: Request):
+    user_id, manager = _require_unlocked(request)
+    conn = manager.vault_conns[user_id]
+    return {"rooms": list_rooms(conn)}
+
+
 @app.get("/api/search")
 async def api_search(
     request: Request,
@@ -269,6 +298,7 @@ async def api_search(
     limit: int = 50,
     months: int | None = None,
     sort: str = "relevance",
+    room_id: str | None = None,
 ):
     user_id, manager = _require_unlocked(request)
     conn = manager.vault_conns[user_id]
@@ -281,11 +311,11 @@ async def api_search(
     if sort not in SORT_ORDERS:
         sort = "relevance"
 
-    rows = search(conn, q, limit=limit, since_ts=since_ts, sort=sort)
+    rows = search(conn, q, limit=limit, since_ts=since_ts, sort=sort, room_id=room_id or None)
     for row in rows:
         row["matrix_to_url"] = f"https://matrix.to/#/{row['room_id']}/{row['event_id']}"
         row["element_url"] = f"{config.ELEMENT_URL}/#/room/{row['room_id']}/{row['event_id']}"
-    return {"query": q, "months": months, "sort": sort, "results": rows}
+    return {"query": q, "months": months, "sort": sort, "room_id": room_id, "results": rows}
 
 
 @app.get("/api/status")
@@ -345,6 +375,7 @@ async def api_admin_users(request: Request):
     for u in control_store.all_users(app_state["control_conn"]):
         unlocked = manager.is_unlocked(u["user_id"])
         stats = get_stats(manager.vault_conns[u["user_id"]]) if unlocked else None
+        health = manager.indexers[u["user_id"]].health() if unlocked else None
         rows.append(
             {
                 "user_id": u["user_id"],
@@ -353,6 +384,7 @@ async def api_admin_users(request: Request):
                 "vault_exists": vault.exists(u["user_id"]),
                 "unlocked": unlocked,
                 "stats": stats,
+                "health": health,
             }
         )
     return {"users": rows}
@@ -373,6 +405,22 @@ async def api_admin_lock_user(request: Request, user_id: str):
     manager: WorkerManager = app_state["manager"]
     await manager.lock_user(user_id)
     return {"status": "locked"}
+
+
+@app.post("/api/admin/users/{user_id}/clear-index")
+async def api_admin_clear_index(request: Request, user_id: str):
+    auth.require_admin(request)
+    _known_admin_target(user_id)
+    manager: WorkerManager = app_state["manager"]
+    if not manager.is_unlocked(user_id):
+        return JSONResponse(
+            {"error": "this user's vault is locked - clearing the index requires it to be open, ask them to unlock first"},
+            status_code=409,
+        )
+    conn = manager.vault_conns[user_id]
+    removed = clear_all(conn)
+    asyncio.create_task(manager.indexers[user_id].resync_history())
+    return {"status": "cleared", "removed": removed, "detail": "Index cleared, resync started in the background."}
 
 
 @app.post("/api/admin/users/{user_id}/deprovision")
