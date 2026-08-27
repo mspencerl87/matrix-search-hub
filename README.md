@@ -188,6 +188,78 @@ encrypted (E2EE) rooms yet. From the search UI:
 Unencrypted rooms need none of this - they index automatically for
 everyone.
 
+## Troubleshooting
+
+General approach: `docker compose logs -f` while reproducing the problem,
+then grep for the relevant symptom below.
+
+**Login / OAuth failures**
+
+- `JSONDecodeError` fetching `.well-known/matrix/client` at startup - a
+  `MATRIX_SERVER_NAME`/`MATRIX_HOMESERVER` mixup (see the note under "How
+  login works" above). Verify with:
+  ```bash
+  curl -s https://<your-server-name>/.well-known/matrix/client
+  ```
+- `Client registration failed ... invalid redirect_uri; invalid client_uri`
+  - `client_uri` (defaults to `BASE_URL`) isn't an HTTPS URL your identity
+  provider accepts. A bare LAN IP over `http://` typically fails this.
+- `Client registration failed ... invalid redirect_uri` (generic, no
+  mention of client_uri) - `client_uri` and `redirect_uri` (built from
+  `BASE_URL`) must share the same origin. Don't point `OAUTH_CLIENT_URI`
+  somewhere else unless you're sure your provider doesn't enforce this.
+- Browser shows `ERR_SSL_PROTOCOL_ERROR` on the callback URL - `BASE_URL`
+  has `https://` but nothing is actually terminating TLS in front of the
+  app. Either fix `BASE_URL` to match reality, or put a real reverse proxy
+  with TLS in front and point `BASE_URL` at that (most identity providers
+  reject plain-HTTP redirect URIs outright anyway, so you'll usually need
+  the proxy regardless).
+- `Authorization grant ... already used` - you reloaded or revisited a
+  stale callback URL from an earlier attempt. Authorization codes are
+  single-use and short-lived; start over from `/auth/login` in a fresh
+  tab rather than reloading an old one.
+- After fixing a `BASE_URL`/OAuth config issue, the log still says
+  `Reusing previously registered OAuth client ...` with the same old
+  client ID - `data/oauth_client.json` wasn't actually deleted. It's
+  often owned by `root` (created by the Docker daemon), so a plain `rm`
+  can silently fail for a non-root user - confirm with `ls -la
+  data/oauth_client.json` after deleting, and use `sudo rm -f` if needed.
+
+**Encrypted rooms / a specific message not showing up**
+
+If `docker compose logs | grep -i "backfill complete"` shows `0 events
+could not be decrypted` but a message you know exists still isn't
+findable:
+
+- Check whether that event is being seen at all:
+  ```bash
+  docker compose logs | grep -i "UNDECRYPTABLE\|no prev_batch"
+  ```
+- Every event gets logged individually as it's processed - `indexing
+  event`, `SKIP (older than retention cutoff)`, or `UNDECRYPTABLE` - so
+  grepping for the room name or a snippet of the message text can confirm
+  whether it was ever seen at all versus silently missed.
+- Per-room sync summaries (`sync timeline for <room>: N event(s),
+  limited=...`) show how many events came back for a room on a given
+  sync pass, and whether a `prev_batch` token was present to page further
+  back from.
+- A stale key export is the most common cause of "this recent message
+  isn't found" even when decryption otherwise looks completely healthy -
+  a key export only covers sessions that existed at the moment you
+  created it. Re-export from Element immediately before importing again
+  if you need current coverage.
+
+**General log filters**
+
+```bash
+docker compose logs -f                                # live tail
+docker compose logs | grep -i error                    # anything that errored
+docker compose logs | grep -i "backfill complete"       # per-user summaries + undecryptable counts
+docker compose logs | grep -i "backfill failed"         # per-room exceptions during backfill (caught, not fatal)
+docker compose logs | grep -i "oauth client"            # confirms fresh vs. reused client registration
+docker compose logs | grep -i "unlocked and started"    # confirms a user's vault actually unlocked
+```
+
 ## Admin panel
 
 Anyone whose Matrix user ID is listed in `ADMIN_USER_IDS` sees an **Admin**
