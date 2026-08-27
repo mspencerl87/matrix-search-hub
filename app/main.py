@@ -35,7 +35,7 @@ async def startup():
     http_session = aiohttp.ClientSession()
     app_state["http_session"] = http_session
 
-    discovery = await oidc.discover(http_session, config.HOMESERVER)
+    discovery = await oidc.discover(http_session, config.SERVER_NAME)
     app_state["discovery"] = discovery
     log.info("Discovered OIDC issuer: %s", discovery.get("issuer"))
 

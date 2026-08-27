@@ -31,6 +31,17 @@ If the response has an `org.matrix.msc2965.authentication` block, you're
 good. If not, this app can't use your homeserver's auth - use the
 single-user `matrix-search` project instead.
 
+Note that `<your-server-name>` above (the domain in user IDs, e.g.
+`vates.tech` for `@you:vates.tech`) is frequently a **different host**
+than `MATRIX_HOMESERVER` (e.g. `matrix.vates.tech`), since `.well-known`
+delegation exists precisely so the client-server API can live somewhere
+else. This app needs both: `MATRIX_HOMESERVER` for actual API calls, and
+`MATRIX_SERVER_NAME` (defaults to `MATRIX_HOMESERVER` if unset) for this
+`.well-known/matrix/client` discovery step specifically. Getting this
+wrong is the most common startup failure - it shows up as a JSON decode
+error fetching `.well-known/matrix/client`, because the API host still
+returns HTTP 200 for that path instead of a clean 404.
+
 ## Encryption model - read this before deploying
 
 Every user's messages and Matrix session tokens are stored in a
@@ -113,7 +124,9 @@ not, is less exposure if anything ever does go wrong.
    ```
 
 2. Set `MATRIX_HOMESERVER` (the real API base URL - see above for how to
-   find it, since it's often not your account's server name).
+   find it, since it's often not your account's server name), and
+   `MATRIX_SERVER_NAME` if that server name differs from it (it usually
+   does - see the note above).
 
 3. Set `BASE_URL` to this app's actual public URL, e.g.
    `https://matrix-search.internal.example.com`. This becomes the OAuth

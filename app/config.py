@@ -2,6 +2,15 @@ import os
 
 HOMESERVER = os.environ["MATRIX_HOMESERVER"].rstrip("/")
 
+# Full URL (with scheme) for the domain in your Matrix user IDs, e.g.
+# https://vates.tech for @you:vates.tech - used only to fetch
+# .well-known/matrix/client for OIDC issuer discovery. This is frequently a
+# different host than MATRIX_HOMESERVER (the resolved client-server API
+# base URL) - defaults to it for simple setups where they happen to be the
+# same, but delegated setups (most orgs with their own domain) need this
+# set explicitly.
+SERVER_NAME = (os.environ.get("MATRIX_SERVER_NAME", "").rstrip("/")) or HOMESERVER
+
 # Public URL this app is reachable at, e.g. https://matrix-search.internal.example.com
 # Must exactly match the redirect_uri registered with the OAuth client (this
 # app builds it as f"{BASE_URL}/auth/callback").

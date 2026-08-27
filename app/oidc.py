@@ -11,11 +11,25 @@ class OIDCError(Exception):
     pass
 
 
-async def discover(session: aiohttp.ClientSession, homeserver: str) -> dict:
-    async with session.get(f"{homeserver}/.well-known/matrix/client") as resp:
+async def discover(session: aiohttp.ClientSession, server_name: str) -> dict:
+    # .well-known/matrix/client is hosted on the server_name (the domain in
+    # user IDs, e.g. vates.tech for @you:vates.tech) - NOT on the resolved
+    # client-server API base URL (e.g. matrix.vates.tech), which is often a
+    # different host entirely. Fetching it from the API host is a common
+    # mistake since that host may still return 200 with an empty/unrelated
+    # body for the path instead of a clean 404.
+    async with session.get(f"{server_name}/.well-known/matrix/client") as resp:
         if resp.status != 200:
-            raise OIDCError(f"Could not fetch {homeserver}/.well-known/matrix/client ({resp.status})")
-        wellknown = await resp.json(content_type=None)
+            raise OIDCError(f"Could not fetch {server_name}/.well-known/matrix/client ({resp.status})")
+        try:
+            wellknown = await resp.json(content_type=None)
+        except Exception as e:
+            raise OIDCError(
+                f"{server_name}/.well-known/matrix/client returned a 200 but the body "
+                f"wasn't valid JSON. Double-check MATRIX_SERVER_NAME is your account's "
+                f"server name (the domain after ':' in your Matrix ID), not the "
+                f"client-server API base URL."
+            ) from e
 
     auth_meta = wellknown.get("org.matrix.msc2965.authentication")
     if not auth_meta:
