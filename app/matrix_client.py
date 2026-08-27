@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 
 from nio import (
     AsyncClient,
@@ -13,7 +14,7 @@ from nio import (
     SyncResponse,
 )
 
-from app.search_index import add_message
+from app.search_index import add_message, prune_older_than
 
 log = logging.getLogger("matrix_client")
 
@@ -52,7 +53,15 @@ class UserIndexer:
     def update_access_token(self, access_token: str) -> None:
         self.client.access_token = access_token
 
+    def _cutoff_ts_ms(self) -> int | None:
+        if not self.cfg.RETENTION_MONTHS:
+            return None
+        return int((time.time() - self.cfg.RETENTION_MONTHS * 30 * 86400) * 1000)
+
     async def _on_message(self, room: MatrixRoom, event: RoomMessageText):
+        cutoff = self._cutoff_ts_ms()
+        if cutoff and event.server_timestamp < cutoff:
+            return
         add_message(
             self.conn, event.event_id, room.room_id, room.display_name, event.sender, event.body, event.server_timestamp
         )
@@ -66,6 +75,7 @@ class UserIndexer:
                 self._prev_batches[room_id] = room_info.timeline.prev_batch
 
     async def run(self):
+        asyncio.create_task(self._prune_loop())
         await self.resync_history()
         while not self._stop:
             try:
@@ -73,6 +83,18 @@ class UserIndexer:
             except Exception:
                 log.exception("[%s] sync_forever crashed, retrying in 10s", self.user_id)
                 await asyncio.sleep(10)
+
+    async def _prune_loop(self):
+        while not self._stop:
+            cutoff = self._cutoff_ts_ms()
+            if cutoff:
+                try:
+                    removed = prune_older_than(self.conn, cutoff)
+                    if removed:
+                        log.info("[%s] pruned %d messages older than retention window", self.user_id, removed)
+                except Exception:
+                    log.exception("[%s] prune failed", self.user_id)
+            await asyncio.sleep(self.cfg.PRUNE_INTERVAL_SECONDS)
 
     async def resync_history(self):
         """Full sync + backfill of every joined room. Safe to call repeatedly
@@ -98,6 +120,7 @@ class UserIndexer:
         room_name = room.display_name if room else room_id
         token = self._prev_batches.get(room_id)
         pages = 0
+        cutoff = self._cutoff_ts_ms()
 
         while token and pages < self.cfg.MAX_BACKFILL_PAGES_PER_ROOM:
             resp = await self.client.room_messages(room_id, start=token, direction=MessageDirection.back, limit=200)
@@ -107,7 +130,11 @@ class UserIndexer:
             if not resp.chunk:
                 break
 
+            reached_cutoff = False
             for event in resp.chunk:
+                if cutoff and event.server_timestamp < cutoff:
+                    reached_cutoff = True
+                    break
                 if isinstance(event, RoomMessageText):
                     add_message(
                         self.conn,
@@ -124,6 +151,8 @@ class UserIndexer:
 
             self.conn.commit()
             pages += 1
+            if reached_cutoff:
+                break
             if resp.end == token:
                 break
             token = resp.end

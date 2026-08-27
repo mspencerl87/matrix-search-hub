@@ -15,6 +15,7 @@ _serializer = URLSafeTimedSerializer(config.SESSION_SECRET, salt="matrix-search-
 
 _pending_lock = threading.Lock()
 _pending_logins: dict[str, dict] = {}
+_pending_tokens: dict[str, dict] = {}
 
 
 def create_session_cookie_value(user_id: str) -> str:
@@ -62,3 +63,37 @@ def _prune_pending() -> None:
     stale = [k for k, v in _pending_logins.items() if v["created_at"] < cutoff]
     for k in stale:
         _pending_logins.pop(k, None)
+
+
+def store_pending_tokens(user_id: str, device_id: str, access_token: str, refresh_token: str | None, expires_at: float) -> None:
+    """Bridges the OIDC callback (which has fresh tokens but no vault yet)
+    to the vault setup/unlock step (which needs the user's passphrase before
+    those tokens can be written anywhere). Never touches disk."""
+    with _pending_lock:
+        cutoff = time.time() - config.PENDING_TOKENS_TTL_SECONDS
+        stale = [k for k, v in _pending_tokens.items() if v["created_at"] < cutoff]
+        for k in stale:
+            _pending_tokens.pop(k, None)
+        _pending_tokens[user_id] = {
+            "device_id": device_id,
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "expires_at": expires_at,
+            "created_at": time.time(),
+        }
+
+
+def pop_pending_tokens(user_id: str) -> dict | None:
+    with _pending_lock:
+        entry = _pending_tokens.pop(user_id, None)
+    if not entry or time.time() - entry["created_at"] > config.PENDING_TOKENS_TTL_SECONDS:
+        return None
+    return entry
+
+
+def peek_pending_tokens(user_id: str) -> dict | None:
+    with _pending_lock:
+        entry = _pending_tokens.get(user_id)
+    if not entry or time.time() - entry["created_at"] > config.PENDING_TOKENS_TTL_SECONDS:
+        return None
+    return entry

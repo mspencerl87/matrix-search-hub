@@ -1,13 +1,15 @@
 import sqlite3
 import time
 
+# Deliberately minimal and unencrypted: just enough to know a user has used
+# this app before and which Matrix device belongs to them, so the UI can
+# show "unlock your vault" instead of "set up a new one". No OAuth tokens or
+# message data live here - those are inside each user's encrypted vault
+# (see vault.py), which is the whole point of this split.
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     user_id TEXT PRIMARY KEY,
     device_id TEXT NOT NULL,
-    access_token TEXT NOT NULL,
-    refresh_token TEXT,
-    expires_at REAL,
     created_at REAL NOT NULL
 );
 """
@@ -20,39 +22,18 @@ def init_db(path: str) -> sqlite3.Connection:
     return conn
 
 
-def upsert_user(conn, user_id, device_id, access_token, refresh_token, expires_at):
+def upsert_user(conn, user_id: str, device_id: str):
     conn.execute(
         """
-        INSERT INTO users (user_id, device_id, access_token, refresh_token, expires_at, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET
-            device_id=excluded.device_id,
-            access_token=excluded.access_token,
-            refresh_token=excluded.refresh_token,
-            expires_at=excluded.expires_at
+        INSERT INTO users (user_id, device_id, created_at) VALUES (?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET device_id=excluded.device_id
         """,
-        (user_id, device_id, access_token, refresh_token, expires_at, time.time()),
+        (user_id, device_id, time.time()),
     )
     conn.commit()
 
 
-def update_tokens(conn, user_id, access_token, refresh_token, expires_at):
-    conn.execute(
-        "UPDATE users SET access_token=?, refresh_token=?, expires_at=? WHERE user_id=?",
-        (access_token, refresh_token, expires_at, user_id),
-    )
-    conn.commit()
-
-
-_COLUMNS = ["user_id", "device_id", "access_token", "refresh_token", "expires_at"]
-
-
-def get_user(conn, user_id):
-    cur = conn.execute(f"SELECT {', '.join(_COLUMNS)} FROM users WHERE user_id=?", (user_id,))
+def get_user(conn, user_id: str):
+    cur = conn.execute("SELECT user_id, device_id FROM users WHERE user_id=?", (user_id,))
     row = cur.fetchone()
-    return dict(zip(_COLUMNS, row)) if row else None
-
-
-def all_users(conn):
-    cur = conn.execute(f"SELECT {', '.join(_COLUMNS)} FROM users")
-    return [dict(zip(_COLUMNS, row)) for row in cur.fetchall()]
+    return {"user_id": row[0], "device_id": row[1]} if row else None

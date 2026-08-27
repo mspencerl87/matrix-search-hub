@@ -26,3 +26,23 @@ USERS_DIR = os.path.join(DATA_DIR, "users")
 
 MAX_BACKFILL_PAGES_PER_ROOM = int(os.environ.get("MAX_BACKFILL_PAGES_PER_ROOM", "500"))
 TOKEN_REFRESH_MARGIN_SECONDS = 60
+
+# How much history is kept at all, per user, regardless of search range
+# selected. Backfill stops paging past this age, and a background job prunes
+# anything already stored that ages out. Admins can raise it; there's no
+# built-in way for a user to raise it past this for themselves.
+RETENTION_MONTHS = int(os.environ.get("RETENTION_MONTHS", "12"))
+
+# Fixed set of choices offered in the search UI's time-range dropdown,
+# filtered down to whatever doesn't exceed RETENTION_MONTHS.
+SEARCH_RANGE_OPTIONS_MONTHS = (1, 3, 6, 12)
+DEFAULT_SEARCH_RANGE_MONTHS = 1
+
+PRUNE_INTERVAL_SECONDS = int(os.environ.get("PRUNE_INTERVAL_SECONDS", str(24 * 3600)))
+
+# Minimum passphrase length for a user's vault. This is the only thing
+# protecting their data from anyone with raw disk/backup access, so don't
+# let it be trivial.
+MIN_VAULT_PASSPHRASE_LENGTH = 12
+
+PENDING_TOKENS_TTL_SECONDS = 900  # time between OIDC callback and vault setup/unlock

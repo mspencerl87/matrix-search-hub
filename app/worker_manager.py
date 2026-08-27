@@ -3,49 +3,53 @@ import logging
 import os
 import time
 
-from app import config, control_store, oidc
+from app import config, oidc, vault
 from app.matrix_client import UserIndexer
-from app.search_index import init_db as init_search_db
+from app.paths import user_dir
 
 log = logging.getLogger("worker_manager")
 
 
-def user_dir(user_id: str) -> str:
-    safe = user_id.replace("@", "").replace(":", "_")
-    return os.path.join(config.USERS_DIR, safe)
-
-
 class WorkerManager:
-    def __init__(self, control_conn, http_session, discovery, client_id, client_secret):
-        self.control_conn = control_conn
+    """Tracks running per-user sync workers and their (unlocked) vault
+    connections. Nothing here is auto-started on process boot - a user's
+    vault can only be opened with their passphrase, so every restart leaves
+    everyone locked until they visit the app and unlock again."""
+
+    def __init__(self, http_session, discovery, client_id, client_secret):
         self.http_session = http_session
         self.discovery = discovery
         self.client_id = client_id
         self.client_secret = client_secret
         self.indexers: dict[str, UserIndexer] = {}
         self.tasks: dict[str, asyncio.Task] = {}
-        self._search_conns: dict[str, object] = {}
+        self.vault_conns: dict[str, object] = {}
 
-    def get_search_conn(self, user_id: str):
-        conn = self._search_conns.get(user_id)
-        if conn is None:
-            d = user_dir(user_id)
-            os.makedirs(d, exist_ok=True)
-            conn = init_search_db(os.path.join(d, "search.db"))
-            self._search_conns[user_id] = conn
-        return conn
+    def is_unlocked(self, user_id: str) -> bool:
+        task = self.tasks.get(user_id)
+        return bool(task and not task.done())
 
-    async def start_user(self, user_id: str, device_id: str, access_token: str):
-        existing = self.tasks.get(user_id)
-        if existing and not existing.done():
+    async def start_user(self, user_id: str, device_id: str, vault_conn, access_token: str):
+        if self.is_unlocked(user_id):
             return
-        d = user_dir(user_id)
-        store_path = os.path.join(d, "nio_store")
-        conn = self.get_search_conn(user_id)
-        indexer = UserIndexer(user_id, device_id, access_token, store_path, conn, config)
+        self.vault_conns[user_id] = vault_conn
+        store_path = os.path.join(user_dir(user_id), "nio_store")
+        indexer = UserIndexer(user_id, device_id, access_token, store_path, vault_conn, config)
         self.indexers[user_id] = indexer
         self.tasks[user_id] = asyncio.create_task(self._run_worker(user_id, indexer))
-        log.info("Started sync worker for %s", user_id)
+        log.info("Unlocked and started sync worker for %s", user_id)
+
+    async def lock_user(self, user_id: str):
+        task = self.tasks.pop(user_id, None)
+        indexer = self.indexers.pop(user_id, None)
+        conn = self.vault_conns.pop(user_id, None)
+        if indexer:
+            await indexer.close()
+        if task:
+            task.cancel()
+        if conn:
+            conn.close()
+        log.info("Locked vault for %s", user_id)
 
     async def _run_worker(self, user_id: str, indexer: UserIndexer):
         refresh_task = asyncio.create_task(self._refresh_loop(user_id, indexer))
@@ -56,11 +60,19 @@ class WorkerManager:
 
     async def _refresh_loop(self, user_id: str, indexer: UserIndexer):
         while True:
-            record = control_store.get_user(self.control_conn, user_id)
+            conn = self.vault_conns.get(user_id)
+            if conn is None:
+                return
+            record = vault.get_oauth(conn)
             if not record or not record.get("refresh_token"):
                 return
             sleep_for = max((record.get("expires_at") or 0) - time.time() - config.TOKEN_REFRESH_MARGIN_SECONDS, 5)
             await asyncio.sleep(sleep_for)
+
+            conn = self.vault_conns.get(user_id)
+            if conn is None:
+                return
+            record = vault.get_oauth(conn)
             try:
                 body = await oidc.refresh_token(
                     self.http_session, self.discovery, self.client_id, self.client_secret, record["refresh_token"]
@@ -73,30 +85,6 @@ class WorkerManager:
             new_access = body["access_token"]
             new_refresh = body.get("refresh_token", record["refresh_token"])
             new_expires_at = time.time() + body.get("expires_in", 300)
-            control_store.update_tokens(self.control_conn, user_id, new_access, new_refresh, new_expires_at)
+            vault.set_oauth(conn, record["device_id"], new_access, new_refresh, new_expires_at)
             indexer.update_access_token(new_access)
             log.info("Refreshed access token for %s", user_id)
-
-    async def restart_known_users(self):
-        for record in control_store.all_users(self.control_conn):
-            user_id = record["user_id"]
-            access_token = record["access_token"]
-            expires_at = record.get("expires_at") or 0
-
-            if expires_at - time.time() < config.TOKEN_REFRESH_MARGIN_SECONDS:
-                if not record.get("refresh_token"):
-                    log.warning("Stored session for %s is expired with no refresh_token; they'll need to log in again", user_id)
-                    continue
-                try:
-                    body = await oidc.refresh_token(
-                        self.http_session, self.discovery, self.client_id, self.client_secret, record["refresh_token"]
-                    )
-                except Exception:
-                    log.exception("Could not refresh token for %s at startup; they'll need to log in again", user_id)
-                    continue
-                access_token = body["access_token"]
-                new_refresh = body.get("refresh_token", record["refresh_token"])
-                new_expires_at = time.time() + body.get("expires_in", 300)
-                control_store.update_tokens(self.control_conn, user_id, access_token, new_refresh, new_expires_at)
-
-            await self.start_user(user_id, record["device_id"], access_token)

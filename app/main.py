@@ -6,11 +6,12 @@ import secrets
 import time
 
 import aiohttp
-from fastapi import FastAPI, File, Form, Query, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
-from app import auth, config, control_store, oidc
+from app import auth, config, control_store, oidc, vault
 from app.search_index import get_stats, search
 from app.worker_manager import WorkerManager, user_dir
 
@@ -20,6 +21,10 @@ log = logging.getLogger("main")
 app = FastAPI(title="matrix-search-hub")
 
 app_state: dict = {}
+
+
+class PassphraseBody(BaseModel):
+    passphrase: str
 
 
 @app.on_event("startup")
@@ -38,12 +43,13 @@ async def startup():
     app_state["client_id"] = client_id
     app_state["client_secret"] = client_secret
 
-    control_conn = control_store.init_db(config.CONTROL_DB_PATH)
-    app_state["control_conn"] = control_conn
+    app_state["control_conn"] = control_store.init_db(config.CONTROL_DB_PATH)
+    app_state["manager"] = WorkerManager(http_session, discovery, client_id, client_secret)
 
-    manager = WorkerManager(control_conn, http_session, discovery, client_id, client_secret)
-    app_state["manager"] = manager
-    await manager.restart_known_users()
+    log.info(
+        "Startup complete. No user data is decrypted until each user unlocks their "
+        "own vault - nothing auto-resumes after a restart by design."
+    )
 
 
 @app.on_event("shutdown")
@@ -88,7 +94,7 @@ async def auth_login():
 
 
 @app.get("/auth/callback")
-async def auth_callback(request: Request, code: str = None, state: str = None, error: str = None):
+async def auth_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
     if error:
         return JSONResponse({"error": error}, status_code=400)
     if not code or not state:
@@ -121,12 +127,10 @@ async def auth_callback(request: Request, code: str = None, state: str = None, e
     device_id = who.get("device_id") or pending["device_id"]
     expires_at = time.time() + token_resp.get("expires_in", 300)
 
-    control_store.upsert_user(
-        app_state["control_conn"], user_id, device_id, token_resp["access_token"], token_resp.get("refresh_token"), expires_at
-    )
-
-    manager: WorkerManager = app_state["manager"]
-    await manager.start_user(user_id, device_id, token_resp["access_token"])
+    # Tokens are held in memory only until the user supplies their vault
+    # passphrase (setup or unlock) - never written to control.db.
+    auth.store_pending_tokens(user_id, device_id, token_resp["access_token"], token_resp.get("refresh_token"), expires_at)
+    control_store.upsert_user(app_state["control_conn"], user_id, device_id)
 
     resp = RedirectResponse("/")
     resp.set_cookie(
@@ -154,33 +158,135 @@ async def api_me(request: Request):
     return {"logged_in": True, "user_id": user_id}
 
 
-@app.get("/api/search")
-async def api_search(request: Request, q: str = Query(..., min_length=1), limit: int = 50):
+@app.get("/api/vault-status")
+async def api_vault_status(request: Request):
     user_id = auth.require_user(request)
     manager: WorkerManager = app_state["manager"]
-    conn = manager.get_search_conn(user_id)
-    rows = search(conn, q, limit=limit)
+    return {
+        "exists": vault.exists(user_id),
+        "unlocked": manager.is_unlocked(user_id),
+        "has_pending_login": auth.peek_pending_tokens(user_id) is not None,
+    }
+
+
+@app.post("/api/vault/setup")
+async def api_vault_setup(request: Request, body: PassphraseBody):
+    user_id = auth.require_user(request)
+    if vault.exists(user_id):
+        return JSONResponse({"error": "a vault already exists for this account, unlock it instead"}, status_code=409)
+    if len(body.passphrase) < config.MIN_VAULT_PASSPHRASE_LENGTH:
+        return JSONResponse(
+            {"error": f"passphrase must be at least {config.MIN_VAULT_PASSPHRASE_LENGTH} characters"}, status_code=400
+        )
+
+    pending = auth.pop_pending_tokens(user_id)
+    if not pending:
+        return JSONResponse({"error": "your login has expired, please sign in again"}, status_code=400)
+
+    conn = vault.open_vault(user_id, body.passphrase)
+    vault.set_oauth(conn, pending["device_id"], pending["access_token"], pending["refresh_token"], pending["expires_at"])
+
+    manager: WorkerManager = app_state["manager"]
+    await manager.start_user(user_id, pending["device_id"], conn, pending["access_token"])
+    return {"status": "unlocked"}
+
+
+@app.post("/api/vault/unlock")
+async def api_vault_unlock(request: Request, body: PassphraseBody):
+    user_id = auth.require_user(request)
+    if not vault.exists(user_id):
+        return JSONResponse({"error": "no vault exists yet for this account, set one up instead"}, status_code=409)
+
+    try:
+        conn = vault.open_vault(user_id, body.passphrase)
+    except vault.WrongPassphrase:
+        return JSONResponse({"error": "incorrect passphrase"}, status_code=401)
+
+    record = vault.get_oauth(conn)
+    if not record:
+        conn.close()
+        return JSONResponse({"error": "vault has no stored session, contact an admin"}, status_code=500)
+
+    access_token = record["access_token"]
+    if (record.get("expires_at") or 0) - time.time() < config.TOKEN_REFRESH_MARGIN_SECONDS:
+        if not record.get("refresh_token"):
+            conn.close()
+            return JSONResponse({"error": "your Matrix session has expired, please sign in again"}, status_code=401)
+        try:
+            body_resp = await oidc.refresh_token(
+                app_state["http_session"], app_state["discovery"], app_state["client_id"], app_state["client_secret"],
+                record["refresh_token"],
+            )
+        except oidc.OIDCError:
+            conn.close()
+            return JSONResponse({"error": "your Matrix session could not be renewed, please sign in again"}, status_code=401)
+        access_token = body_resp["access_token"]
+        new_refresh = body_resp.get("refresh_token", record["refresh_token"])
+        new_expires_at = time.time() + body_resp.get("expires_in", 300)
+        vault.set_oauth(conn, record["device_id"], access_token, new_refresh, new_expires_at)
+
+    manager: WorkerManager = app_state["manager"]
+    await manager.start_user(user_id, record["device_id"], conn, access_token)
+    return {"status": "unlocked"}
+
+
+@app.post("/api/vault/lock")
+async def api_vault_lock(request: Request):
+    user_id = auth.require_user(request)
+    manager: WorkerManager = app_state["manager"]
+    await manager.lock_user(user_id)
+    return {"status": "locked"}
+
+
+@app.get("/api/config")
+async def api_config():
+    allowed = [m for m in config.SEARCH_RANGE_OPTIONS_MONTHS if m <= config.RETENTION_MONTHS]
+    if not allowed:
+        allowed = [config.RETENTION_MONTHS]
+    default = config.DEFAULT_SEARCH_RANGE_MONTHS if config.DEFAULT_SEARCH_RANGE_MONTHS in allowed else allowed[0]
+    return {"range_options_months": allowed, "default_months": default, "retention_months": config.RETENTION_MONTHS}
+
+
+def _require_unlocked(request: Request):
+    user_id = auth.require_user(request)
+    manager: WorkerManager = app_state["manager"]
+    if not manager.is_unlocked(user_id):
+        raise _locked_error()
+    return user_id, manager
+
+
+def _locked_error():
+    return HTTPException(status_code=423, detail="vault is locked, unlock it first")
+
+
+@app.get("/api/search")
+async def api_search(request: Request, q: str = Query(..., min_length=1), limit: int = 50, months: int | None = None):
+    user_id, manager = _require_unlocked(request)
+    conn = manager.vault_conns[user_id]
+
+    allowed = [m for m in config.SEARCH_RANGE_OPTIONS_MONTHS if m <= config.RETENTION_MONTHS] or [config.RETENTION_MONTHS]
+    if months not in allowed:
+        months = config.DEFAULT_SEARCH_RANGE_MONTHS if config.DEFAULT_SEARCH_RANGE_MONTHS in allowed else allowed[0]
+    since_ts = int((time.time() - months * 30 * 86400) * 1000)
+
+    rows = search(conn, q, limit=limit, since_ts=since_ts)
     for row in rows:
         row["matrix_to_url"] = f"https://matrix.to/#/{row['room_id']}/{row['event_id']}"
         row["element_url"] = f"{config.ELEMENT_URL}/#/room/{row['room_id']}/{row['event_id']}"
-    return {"query": q, "results": rows}
+    return {"query": q, "months": months, "results": rows}
 
 
 @app.get("/api/status")
 async def api_status(request: Request):
-    user_id = auth.require_user(request)
-    manager: WorkerManager = app_state["manager"]
-    conn = manager.get_search_conn(user_id)
+    user_id, manager = _require_unlocked(request)
+    conn = manager.vault_conns[user_id]
     return get_stats(conn)
 
 
 @app.post("/api/import-keys")
 async def api_import_keys(request: Request, file: UploadFile = File(...), passphrase: str = Form(...)):
-    user_id = auth.require_user(request)
-    manager: WorkerManager = app_state["manager"]
-    indexer = manager.indexers.get(user_id)
-    if not indexer:
-        return JSONResponse({"error": "your sync worker isn't ready yet, try again in a moment"}, status_code=503)
+    user_id, manager = _require_unlocked(request)
+    indexer = manager.indexers[user_id]
 
     d = user_dir(user_id)
     os.makedirs(d, exist_ok=True)

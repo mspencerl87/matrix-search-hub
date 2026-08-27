@@ -3,15 +3,21 @@
 A centralized, multi-user version of [matrix-search](https://github.com/mspencerl87/matrix-search):
 one deployment that any employee can sign into with their own company
 account, each getting their own searchable index of their own Matrix
-message history. Nobody can see anyone else's messages.
+message history. Nobody else - including the person running this server -
+can read it without that user's own passphrase.
 
-Unlike the single-user project (which needs `MATRIX_PASSWORD` or a
-manually-copied SSO token in `.env`), this one implements real OIDC login:
-users click "Sign in," authenticate against your identity provider exactly
-like they would in Element, and get redirected back in - no tokens to copy,
-no per-user container config.
+## How login works
 
-## Requirements
+1. A user clicks **Sign in**, which redirects them to your identity
+   provider's real login page with a PKCE challenge and a freshly generated
+   Matrix device ID embedded in the OAuth scope, per MSC2967.
+2. They authenticate there exactly as they would signing into Element.
+3. The provider redirects back to `/auth/callback` with an authorization
+   code, exchanged server-side for an access token + refresh token - this
+   becomes that user's own dedicated Matrix session/device.
+4. The app registers itself as an OAuth client automatically on first
+   startup via dynamic client registration (no admin action needed) and
+   caches the result in `data/oauth_client.json`.
 
 This only works against a homeserver running **OIDC-native auth**
 ([MSC2965](https://github.com/matrix-org/matrix-spec-proposals/pull/2965) /
@@ -23,32 +29,80 @@ curl -s https://<your-server-name>/.well-known/matrix/client
 
 If the response has an `org.matrix.msc2965.authentication` block, you're
 good. If not, this app can't use your homeserver's auth - use the
-single-user `matrix-search` project instead (with `MATRIX_PASSWORD` or a
-manually obtained SSO token).
+single-user `matrix-search` project instead.
 
-## How the login works
+## Encryption model - read this before deploying
 
-1. A user clicks **Sign in**, which redirects them to your identity
-   provider's real login page (`authorization_endpoint`) with a PKCE
-   challenge and a freshly generated Matrix device ID embedded in the
-   OAuth scope, per MSC2967.
-2. They authenticate there exactly as they would signing into Element.
-3. The provider redirects back to `/auth/callback` with an authorization
-   code, which the app exchanges server-side for an access token + refresh
-   token - this becomes that user's own dedicated Matrix session/device.
-4. The app looks up their `user_id` via `/_matrix/client/v3/account/whoami`,
-   starts a background sync worker for them (full backfill + live sync into
-   their own private SQLite database), and sets a signed session cookie so
-   their browser is "logged in" to the search UI.
-5. Access tokens are refreshed automatically in the background using the
-   refresh token, indefinitely - no re-login needed unless the refresh
-   token itself is revoked (e.g. an admin ends the session, or the user
-   revokes it from their Element session list).
+Every user's messages and Matrix session tokens are stored in a
+**per-user, passphrase-encrypted database** (`data/users/<user>/vault.db`,
+via SQLCipher). Nobody can read a user's data without that specific
+passphrase - not an admin with full filesystem access, not a database
+backup, not anyone else at the company. That passphrase:
 
-The app registers itself as an OAuth client automatically on first startup
-via dynamic client registration (no admin action needed, unlike setting up
-the single-user project's SSO token by hand) and caches the result in
-`data/oauth_client.json`.
+- is set by the user themselves the first time they use the app (separate
+  from their SSO password),
+- is never sent anywhere but that one request, and never stored anywhere,
+  not even hashed - the only proof it's correct is that it successfully
+  decrypts that user's existing vault,
+- lives only in server memory, only for as long as that user's sync worker
+  is running.
+
+**What this actually defends against:** someone pulling the database, a
+backup, or raw files off disk gets nothing readable. A "just export this
+person's messages" request has no technical answer unless that person
+unlocks it themselves.
+
+**What this does *not* defend against**, and it's worth being honest about
+both:
+1. Someone directly compelling a user to type their own passphrase under
+   pressure - that's a policy/HR/legal problem, not one encryption solves.
+2. Whoever controls what code actually runs on this server modifying it to
+   capture passphrases as they're typed. If the same people you're
+   protecting data from also control deployment of this app, no amount of
+   application-level encryption closes that gap - it needs independent
+   code review/audit, or hosting this somewhere that party doesn't control.
+
+### What this means day to day
+
+- **First time:** after signing in, a user sets their passphrase and
+  indexing starts immediately - full backfill, then live sync, same as
+  before.
+- **Normal use:** once unlocked, everything behaves exactly as you'd
+  expect - instant search, live indexing, no repeated prompts. The
+  passphrase stays resident in server memory for the life of the process.
+- **After a restart** (deploy, host reboot, crash): every user's worker is
+  paused - **nothing auto-resumes**, by design, since resuming would mean
+  the key survived the restart somewhere, which defeats the point. Each
+  person needs to visit the app and unlock again before their indexing
+  picks back up. This is the entire cost of the model: an occasional
+  re-unlock, not degraded search.
+- **If someone forgets their passphrase:** there is no recovery. Their
+  vault is unreadable, by design - the whole guarantee rests on nobody but
+  them being able to open it. An admin can only delete their vault file
+  (`data/users/<user>/vault.db`) so they can set up a fresh one; the old
+  index is gone.
+- Users can also click **Lock** to proactively evict their key from server
+  memory before walking away from a shared or untrusted machine.
+
+## Search range & retention
+
+Two related but distinct settings:
+
+- **Search range** - a dropdown in the search UI (1 / 3 / 6 / 12 months,
+  default 1 month) that limits how far back a given search scans, for
+  speed. Options beyond `RETENTION_MONTHS` are hidden since there'd be
+  nothing to find past that anyway.
+- **Retention** (`RETENTION_MONTHS`, default `12`) - the actual cap on how
+  much history is ever stored per user, admin-configured via env var.
+  Backfill stops paging back once it reaches messages older than this, and
+  a background job prunes anything already stored that ages out over
+  time. Raising it only affects newly-indexed and future data - it does
+  not retroactively recover messages that were already pruned or never
+  backfilled under a lower setting.
+
+This also has a privacy benefit worth noting given the encryption model
+above: less decrypted history ever sitting on disk at all, encrypted or
+not, is less exposure if anything ever does go wrong.
 
 ## Setup
 
@@ -58,32 +112,33 @@ the single-user project's SSO token by hand) and caches the result in
    cp .env.example .env
    ```
 
-2. Set `MATRIX_HOMESERVER` (the real API base URL - see Requirements
-   above for how to find it).
+2. Set `MATRIX_HOMESERVER` (the real API base URL - see above for how to
+   find it, since it's often not your account's server name).
 
 3. Set `BASE_URL` to this app's actual public URL, e.g.
    `https://matrix-search.internal.example.com`. This becomes the OAuth
    `redirect_uri` (`{BASE_URL}/auth/callback`), which must be reachable by
-   every user's browser. Most identity providers require this to be
-   `https://` in practice - put this behind a reverse proxy with a real
-   certificate (Caddy/Traefik/nginx) rather than exposing plain HTTP
-   directly, unless your provider explicitly allows HTTP for internal use.
+   every user's browser and generally needs to be `https://` - put this
+   behind a reverse proxy with a real certificate (Caddy/Traefik/nginx)
+   rather than exposing plain HTTP directly.
 
-   Once people are actively using the app, don't change `BASE_URL` without
-   also deleting `data/oauth_client.json` to force re-registering the
-   OAuth client with the new redirect URI - a mismatch here is a common
-   source of login failures.
+   Once people are using the app, don't change `BASE_URL` without also
+   deleting `data/oauth_client.json` to force re-registering the OAuth
+   client with the new redirect URI.
 
-4. Generate a session secret and set it:
+4. Generate a session secret:
 
    ```bash
    openssl rand -hex 32
    ```
 
    Put the output in `SESSION_SECRET`. Keep it stable - rotating it logs
-   everyone out.
+   everyone out (their vaults are unaffected, they just need to unlock
+   again).
 
-5. Build and start:
+5. Optionally adjust `RETENTION_MONTHS` (default `12`).
+
+6. Build and start:
 
    ```bash
    docker compose up -d --build
@@ -96,21 +151,21 @@ the single-user project's SSO token by hand) and caches the result in
    register a client manually and you set `OAUTH_CLIENT_ID` /
    `OAUTH_CLIENT_SECRET` instead (redirect URI: `{BASE_URL}/auth/callback`).
 
-6. Open `http://<host>:8080` (or wherever you've mapped/proxied it) and
-   click **Sign in**.
+7. Open `http://<host>:8080` (or wherever you've mapped/proxied it), sign
+   in, and set a passphrase.
 
-## Encrypted rooms
+## Encrypted Matrix rooms
 
-Each user's login creates a **brand-new Matrix device**, genuinely owned
-by their own OAuth session - so it starts with none of the room keys
-needed to decrypt their encrypted (E2EE) rooms, same situation as the
-single-user project. Per user, from the search UI itself:
+Separate from the vault passphrase above - this is about Matrix's own
+end-to-end encryption for individual rooms. Each user's login creates a
+brand-new Matrix device with none of the room keys needed to decrypt their
+encrypted (E2EE) rooms yet. From the search UI:
 
-- **Historical messages:** the "Import your Element key export" panel
-  under the search box - export keys from Element (Settings > Security &
-  Privacy > Export keys) and upload the file with its passphrase. This
-  triggers a background re-scan of that user's history that picks up
-  whatever's now decryptable.
+- **Historical messages:** the "Import your Element key export" panel -
+  export keys from Element (Settings > Security & Privacy > Export keys)
+  and upload the file with its passphrase (a different passphrase from
+  the vault one). Triggers a background re-scan that picks up whatever's
+  now decryptable.
 - **New messages going forward:** each user should verify this app's
   session from their own Element (Settings > Sessions, look for
   `matrix-search-hub`) using their own recovery key, so their other
@@ -121,33 +176,33 @@ everyone.
 
 ## Data & security notes
 
-This is worth reading before deploying company-wide, not just skimming:
-
-- Every user's messages are stored **decrypted, in plaintext**, in
-  `data/users/<user>/search.db`. Centralizing this is a real security
-  tradeoff versus everyone running their own single-user instance: a
-  compromise of this server exposes every indexed user's message history
-  in one place, encrypted rooms included. Make sure whoever owns security
-  policy for your org is fine with that before this goes into production
-  use.
-- `data/control.db` holds every logged-in user's OAuth access + refresh
-  tokens. Anyone with read access to that file can act as any of those
-  users against the homeserver. Treat `data/` as highly sensitive; back it
-  up encrypted if at all, and restrict host-level access to it tightly.
+- `data/users/<user>/vault.db` holds that user's decrypted messages and
+  Matrix OAuth tokens, encrypted at rest with their passphrase (SQLCipher).
+  This is the only place either lives.
+- `data/control.db` is intentionally minimal and unencrypted: just which
+  user IDs have used the app and their device ID, so the UI can show
+  "unlock" vs "set up". No tokens or message data.
 - `data/oauth_client.json` holds this app's own OAuth client secret if one
   was issued. Don't commit it or expose it.
-- Logging out only clears the browser session cookie - the background
-  sync worker for that user keeps running so their index stays current.
-  There's currently no admin UI to fully deprovision a user (stop their
-  worker, delete their data); do that manually by removing their row from
-  `data/control.db` and their directory under `data/users/` if someone
-  leaves the company.
+- Logging out only clears the browser session cookie - if the vault is
+  still unlocked in server memory, the background sync worker keeps
+  running so the index stays current. Use **Lock** (or a restart) to
+  actually evict a user's key from memory.
+- To fully deprovision someone who's left the company: remove their row
+  from `data/control.db` and delete their directory under
+  `data/users/` - there's no admin UI for this yet, it's a manual step.
 
 ## API
 
 - `GET /api/me` — current session's user_id, or 401.
-- `GET /api/search?q=...&limit=50` — search results for the logged-in
-  user only.
-- `GET /api/status` — indexed message/room counts for the logged-in user.
+- `GET /api/vault-status` — `{exists, unlocked, has_pending_login}` for
+  the logged-in user.
+- `POST /api/vault/setup` — `{passphrase}`, first-time vault creation.
+- `POST /api/vault/unlock` — `{passphrase}`, resumes an existing vault.
+- `POST /api/vault/lock` — evicts the key from memory, stops syncing.
+- `GET /api/config` — search range options and retention, for the UI.
+- `GET /api/search?q=...&limit=50&months=1` — search results for the
+  logged-in user's unlocked vault only; 423 if locked.
+- `GET /api/status` — indexed message/room counts; 423 if locked.
 - `POST /api/import-keys` — multipart `file` + `passphrase`, imports a
-  key export for the logged-in user and triggers a background re-scan.
+  Matrix room-key export and triggers a background re-scan.

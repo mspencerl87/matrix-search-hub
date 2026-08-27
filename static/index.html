@@ -13,6 +13,7 @@
     --text: #e3e3e8;
     --muted: #9092a0;
     --accent: #0dbd8b;
+    --danger: #ff6b6b;
     --mark-bg: #0dbd8b55;
   }
   * { box-sizing: border-box; }
@@ -22,15 +23,11 @@
     color: var(--text);
     font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
-  header {
-    padding: 24px 16px 12px;
-    max-width: 760px;
-    margin: 0 auto;
-  }
+  header { padding: 24px 16px 12px; max-width: 760px; margin: 0 auto; }
   .top-row { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
   h1 { font-size: 1.3rem; margin: 0; }
   .account { font-size: 0.8rem; color: var(--muted); }
-  .account a { color: var(--accent); text-decoration: none; margin-left: 10px; }
+  .account a, .account button.link { color: var(--accent); text-decoration: none; margin-left: 10px; background: none; border: none; cursor: pointer; font-size: inherit; padding: 0; }
   .searchbar { display: flex; gap: 8px; margin-top: 14px; }
   input[type="text"], input[type="password"], input[type="file"] {
     padding: 12px 14px;
@@ -39,6 +36,14 @@
     background: var(--panel);
     color: var(--text);
     font-size: 1rem;
+  }
+  select {
+    padding: 12px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    font-size: 0.9rem;
   }
   input[type="text"] { flex: 1; }
   input[type="text"]:focus, input[type="password"]:focus { outline: 2px solid var(--accent); }
@@ -69,8 +74,10 @@
   .result-links a { color: var(--accent); font-size: 0.8rem; text-decoration: none; }
   .result-links a:hover { text-decoration: underline; }
   .empty { color: var(--muted); padding: 40px 0; text-align: center; }
-  .signin-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 70vh; gap: 16px; text-align: center; }
-  .signin-screen p { color: var(--muted); max-width: 420px; }
+  .center-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 70vh; gap: 14px; text-align: center; padding: 20px; }
+  .center-screen p { color: var(--muted); max-width: 440px; margin: 0; }
+  .center-screen form { display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 320px; margin-top: 6px; }
+  .field-error { color: var(--danger); font-size: 0.85rem; min-height: 1.2em; }
   details.keys { margin-top: 20px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; }
   details.keys summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
   .keys form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
@@ -81,20 +88,51 @@
 </head>
 <body>
 
-<div id="signin" class="signin-screen" hidden>
+<div id="signin" class="center-screen" hidden>
   <h1>Matrix Search</h1>
-  <p>Search your own Matrix message history. Sign in with your company account to get started - a background sync of your rooms starts automatically.</p>
+  <p>Search your own Matrix message history. Sign in with your company account to get started.</p>
   <a class="btn" href="/auth/login">Sign in</a>
+</div>
+
+<div id="vaultSetup" class="center-screen" hidden>
+  <h1>Protect your search index</h1>
+  <p>
+    Set a passphrase for your search index. It's separate from your company
+    login, never sent anywhere but this form, and never stored - if you
+    forget it, your index can't be recovered and you'll need to start over.
+    Nobody with server or backup access can read your messages without it.
+  </p>
+  <form id="setupForm">
+    <input type="password" id="setupPass" placeholder="Choose a passphrase (12+ characters)" required minlength="12">
+    <input type="password" id="setupPassConfirm" placeholder="Confirm passphrase" required minlength="12">
+    <button type="submit">Set passphrase &amp; start indexing</button>
+  </form>
+  <div class="field-error" id="setupError"></div>
+</div>
+
+<div id="vaultUnlock" class="center-screen" hidden>
+  <h1>Unlock your search index</h1>
+  <p>Enter your passphrase to resume syncing and searching your messages.</p>
+  <form id="unlockForm">
+    <input type="password" id="unlockPass" placeholder="Your passphrase" required>
+    <button type="submit">Unlock</button>
+  </form>
+  <div class="field-error" id="unlockError"></div>
 </div>
 
 <div id="app" hidden>
 <header>
   <div class="top-row">
     <h1>Matrix Search</h1>
-    <div class="account"><span id="whoami"></span><a href="/auth/logout">Log out</a></div>
+    <div class="account">
+      <span id="whoami"></span>
+      <button class="link" id="lockBtn">Lock</button>
+      <a href="/auth/logout">Log out</a>
+    </div>
   </div>
   <div class="searchbar">
     <input id="q" type="text" placeholder="Search your message history..." autofocus>
+    <select id="range"></select>
     <button id="go">Search</button>
   </div>
   <div class="status" id="status">Loading index status...</div>
@@ -120,11 +158,20 @@
 </div>
 
 <script>
-const signinScreen = document.getElementById('signin');
-const appScreen = document.getElementById('app');
+const screens = {
+  signin: document.getElementById('signin'),
+  vaultSetup: document.getElementById('vaultSetup'),
+  vaultUnlock: document.getElementById('vaultUnlock'),
+  app: document.getElementById('app'),
+};
+function showScreen(name) {
+  for (const key in screens) screens[key].hidden = (key !== name);
+}
+
 const whoamiEl = document.getElementById('whoami');
 const q = document.getElementById('q');
 const go = document.getElementById('go');
+const rangeSelect = document.getElementById('range');
 const results = document.getElementById('results');
 const statusEl = document.getElementById('status');
 const keysForm = document.getElementById('keysForm');
@@ -133,32 +180,62 @@ const keysMsg = document.getElementById('keysMsg');
 function escapeHtml(s) {
   return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
-
 function renderSnippet(snippet) {
   const escaped = escapeHtml(snippet);
   return escaped.replace(/\[\[/g, '<mark>').replace(/\]\]/g, '</mark>');
 }
 
 async function init() {
+  let me;
   try {
     const r = await fetch('/api/me');
-    if (r.status === 401) {
-      signinScreen.hidden = false;
-      return;
-    }
+    if (r.status === 401) { showScreen('signin'); return; }
+    me = await r.json();
+  } catch (e) { showScreen('signin'); return; }
+
+  whoamiEl.textContent = me.user_id;
+
+  let vs;
+  try {
+    const r = await fetch('/api/vault-status');
+    vs = await r.json();
+  } catch (e) { showScreen('signin'); return; }
+
+  if (vs.unlocked) {
+    await enterApp();
+  } else if (vs.exists) {
+    showScreen('vaultUnlock');
+  } else if (vs.has_pending_login) {
+    showScreen('vaultSetup');
+  } else {
+    // vault doesn't exist and the post-login token window expired
+    showScreen('signin');
+  }
+}
+
+async function enterApp() {
+  showScreen('app');
+  await loadRangeOptions();
+  loadStatus();
+  setInterval(loadStatus, 15000);
+}
+
+async function loadRangeOptions() {
+  try {
+    const r = await fetch('/api/config');
     const j = await r.json();
-    whoamiEl.textContent = j.user_id;
-    appScreen.hidden = false;
-    loadStatus();
-    setInterval(loadStatus, 15000);
+    rangeSelect.innerHTML = j.range_options_months.map(m =>
+      `<option value="${m}" ${m === j.default_months ? 'selected' : ''}>${m === 1 ? '1 month' : m + ' months'}</option>`
+    ).join('');
   } catch (e) {
-    signinScreen.hidden = false;
+    rangeSelect.innerHTML = '<option value="1">1 month</option>';
   }
 }
 
 async function loadStatus() {
   try {
     const r = await fetch('/api/status');
+    if (r.status === 423) { showScreen('vaultUnlock'); return; }
     const j = await r.json();
     statusEl.textContent = `${j.indexed_messages} messages indexed across ${j.rooms} rooms`;
   } catch (e) {
@@ -171,8 +248,10 @@ async function doSearch() {
   if (!query) return;
   results.innerHTML = '<div class="empty">Searching...</div>';
   try {
-    const r = await fetch('/api/search?q=' + encodeURIComponent(query));
+    const months = rangeSelect.value || 1;
+    const r = await fetch(`/api/search?q=${encodeURIComponent(query)}&months=${months}`);
     if (r.status === 401) { location.reload(); return; }
+    if (r.status === 423) { showScreen('vaultUnlock'); return; }
     const j = await r.json();
     if (!j.results.length) {
       results.innerHTML = '<div class="empty">No results.</div>';
@@ -197,6 +276,51 @@ async function doSearch() {
 go.addEventListener('click', doSearch);
 q.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
 
+document.getElementById('setupForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pass = document.getElementById('setupPass').value;
+  const confirm = document.getElementById('setupPassConfirm').value;
+  const errEl = document.getElementById('setupError');
+  errEl.textContent = '';
+  if (pass !== confirm) { errEl.textContent = "Passphrases don't match."; return; }
+  try {
+    const r = await fetch('/api/vault/setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ passphrase: pass }),
+    });
+    const j = await r.json();
+    if (!r.ok) { errEl.textContent = j.error || 'Setup failed.'; return; }
+    await enterApp();
+  } catch (e) {
+    errEl.textContent = 'Setup failed.';
+  }
+});
+
+document.getElementById('unlockForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pass = document.getElementById('unlockPass').value;
+  const errEl = document.getElementById('unlockError');
+  errEl.textContent = '';
+  try {
+    const r = await fetch('/api/vault/unlock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ passphrase: pass }),
+    });
+    const j = await r.json();
+    if (!r.ok) { errEl.textContent = j.error || 'Unlock failed.'; return; }
+    await enterApp();
+  } catch (e) {
+    errEl.textContent = 'Unlock failed.';
+  }
+});
+
+document.getElementById('lockBtn').addEventListener('click', async () => {
+  try { await fetch('/api/vault/lock', { method: 'POST' }); } catch (e) {}
+  location.reload();
+});
+
 keysForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const fileInput = document.getElementById('keysFile');
@@ -209,7 +333,7 @@ keysForm.addEventListener('submit', async (e) => {
   try {
     const r = await fetch('/api/import-keys', { method: 'POST', body: fd });
     const j = await r.json();
-    keysMsg.textContent = r.ok ? (j.detail || 'Imported.') : (j.error || 'Import failed.');
+    keysMsg.textContent = r.ok ? (j.detail || 'Imported.') : (j.error || j.detail || 'Import failed.');
   } catch (e) {
     keysMsg.textContent = 'Import failed.';
   }
