@@ -310,11 +310,16 @@ accounts," not "can read anyone's data."
 - `POST /api/vault/unlock` — `{passphrase}`, resumes an existing vault.
 - `POST /api/vault/lock` — evicts the key from memory, stops syncing.
 - `GET /api/config` — search range options and retention, for the UI.
-- `GET /api/search?q=...&limit=50&months=1` — search results for the
-  logged-in user's unlocked vault only; 423 if locked.
+- `GET /api/search?q=...&limit=50&months=1&sort=relevance` — search
+  results for the logged-in user's unlocked vault only; 423 if locked.
+  `sort` is one of `relevance` (default), `newest`, or `oldest`.
 - `GET /api/status` — indexed message/room counts; 423 if locked.
+- `POST /api/resync` — re-runs a full sync + backfill in the background
+  for the logged-in user, without needing a key import. Useful if you
+  suspect indexing stalled or missed something.
 - `POST /api/import-keys` — multipart `file` + `passphrase`, imports a
-  Matrix room-key export and triggers a background re-scan.
+  Matrix room-key export and triggers the same background re-scan as
+  `/api/resync`.
 - `GET /api/admin/overview`, `GET /api/admin/users` — admin-only, metadata
   as described above.
 - `POST /api/admin/users/{user_id}/lock`, `POST /api/admin/users/{user_id}/deprovision` — admin-only.

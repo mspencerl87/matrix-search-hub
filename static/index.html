@@ -27,7 +27,7 @@
   .top-row { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
   h1 { font-size: 1.3rem; margin: 0; }
   .account { font-size: 0.8rem; color: var(--muted); }
-  .account a, .account button.link { color: var(--accent); text-decoration: none; margin-left: 10px; background: none; border: none; cursor: pointer; font-size: inherit; padding: 0; }
+  .account a, button.link { color: var(--accent); text-decoration: none; margin-left: 10px; background: none; border: none; cursor: pointer; font-size: inherit; padding: 0; }
   .searchbar { display: flex; gap: 8px; margin-top: 14px; }
   input[type="text"], input[type="password"], input[type="file"] {
     padding: 12px 14px;
@@ -59,6 +59,7 @@
     display: inline-block;
   }
   .status { color: var(--muted); font-size: 0.8rem; margin-top: 8px; }
+  .resync-msg { margin-left: 8px; }
   main { max-width: 760px; margin: 0 auto; padding: 0 16px 40px; }
   .result {
     background: var(--panel);
@@ -134,9 +135,18 @@
   <div class="searchbar">
     <input id="q" type="text" placeholder="Search your message history..." autofocus>
     <select id="range"></select>
+    <select id="sort">
+      <option value="relevance">Best match</option>
+      <option value="newest">Newest first</option>
+      <option value="oldest">Oldest first</option>
+    </select>
     <button id="go">Search</button>
   </div>
-  <div class="status" id="status">Loading index status...</div>
+  <div class="status">
+    <span id="status">Loading index status...</span>
+    <button class="link" id="resyncBtn">Resync now</button>
+    <span id="resyncMsg" class="resync-msg"></span>
+  </div>
 
   <details class="keys">
     <summary>Encrypted rooms not showing up? Import your Element key export</summary>
@@ -173,6 +183,9 @@ const whoamiEl = document.getElementById('whoami');
 const q = document.getElementById('q');
 const go = document.getElementById('go');
 const rangeSelect = document.getElementById('range');
+const sortSelect = document.getElementById('sort');
+const resyncBtn = document.getElementById('resyncBtn');
+const resyncMsg = document.getElementById('resyncMsg');
 const results = document.getElementById('results');
 const statusEl = document.getElementById('status');
 const keysForm = document.getElementById('keysForm');
@@ -251,7 +264,8 @@ async function doSearch() {
   results.innerHTML = '<div class="empty">Searching...</div>';
   try {
     const months = rangeSelect.value || 1;
-    const r = await fetch(`/api/search?q=${encodeURIComponent(query)}&months=${months}`);
+    const sort = sortSelect.value || 'relevance';
+    const r = await fetch(`/api/search?q=${encodeURIComponent(query)}&months=${months}&sort=${sort}`);
     if (r.status === 401) { location.reload(); return; }
     if (r.status === 423) { showScreen('vaultUnlock'); return; }
     const j = await r.json();
@@ -277,6 +291,20 @@ async function doSearch() {
 
 go.addEventListener('click', doSearch);
 q.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+
+resyncBtn.addEventListener('click', async () => {
+  resyncBtn.disabled = true;
+  resyncMsg.textContent = 'Starting resync...';
+  try {
+    const r = await fetch('/api/resync', { method: 'POST' });
+    const j = await r.json();
+    resyncMsg.textContent = r.ok ? (j.detail || 'Resyncing.') : (j.error || j.detail || 'Resync failed.');
+  } catch (e) {
+    resyncMsg.textContent = 'Resync failed.';
+  } finally {
+    resyncBtn.disabled = false;
+  }
+});
 
 document.getElementById('setupForm').addEventListener('submit', async (e) => {
   e.preventDefault();

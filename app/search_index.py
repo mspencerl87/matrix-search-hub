@@ -16,7 +16,14 @@ def _fts_query(raw: str) -> str:
     return " ".join(escaped) if escaped else '""'
 
 
-def search(conn, query: str, limit: int = 50, room_id: str = None, since_ts: int = None):
+SORT_ORDERS = {
+    "relevance": "rank",
+    "newest": "m.origin_server_ts DESC",
+    "oldest": "m.origin_server_ts ASC",
+}
+
+
+def search(conn, query: str, limit: int = 50, room_id: str = None, since_ts: int = None, sort: str = "relevance"):
     fts_q = _fts_query(query)
     sql = """
         SELECT m.event_id, m.room_id, m.room_name, m.sender, m.body, m.origin_server_ts,
@@ -32,7 +39,8 @@ def search(conn, query: str, limit: int = 50, room_id: str = None, since_ts: int
     if since_ts is not None:
         sql += " AND m.origin_server_ts >= ?"
         params.append(since_ts)
-    sql += " ORDER BY rank LIMIT ?"
+    order_by = SORT_ORDERS.get(sort, "rank")
+    sql += f" ORDER BY {order_by} LIMIT ?"
     params.append(limit)
     cur = conn.execute(sql, params)
     cols = [d[0] for d in cur.description]

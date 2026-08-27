@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app import auth, config, control_store, oidc, vault
-from app.search_index import get_stats, search
+from app.search_index import SORT_ORDERS, get_stats, search
 from app.worker_manager import WorkerManager, user_dir
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -263,7 +263,13 @@ def _locked_error():
 
 
 @app.get("/api/search")
-async def api_search(request: Request, q: str = Query(..., min_length=1), limit: int = 50, months: int | None = None):
+async def api_search(
+    request: Request,
+    q: str = Query(..., min_length=1),
+    limit: int = 50,
+    months: int | None = None,
+    sort: str = "relevance",
+):
     user_id, manager = _require_unlocked(request)
     conn = manager.vault_conns[user_id]
 
@@ -272,11 +278,14 @@ async def api_search(request: Request, q: str = Query(..., min_length=1), limit:
         months = config.DEFAULT_SEARCH_RANGE_MONTHS if config.DEFAULT_SEARCH_RANGE_MONTHS in allowed else allowed[0]
     since_ts = int((time.time() - months * 30 * 86400) * 1000)
 
-    rows = search(conn, q, limit=limit, since_ts=since_ts)
+    if sort not in SORT_ORDERS:
+        sort = "relevance"
+
+    rows = search(conn, q, limit=limit, since_ts=since_ts, sort=sort)
     for row in rows:
         row["matrix_to_url"] = f"https://matrix.to/#/{row['room_id']}/{row['event_id']}"
         row["element_url"] = f"{config.ELEMENT_URL}/#/room/{row['room_id']}/{row['event_id']}"
-    return {"query": q, "months": months, "results": rows}
+    return {"query": q, "months": months, "sort": sort, "results": rows}
 
 
 @app.get("/api/status")
@@ -284,6 +293,14 @@ async def api_status(request: Request):
     user_id, manager = _require_unlocked(request)
     conn = manager.vault_conns[user_id]
     return get_stats(conn)
+
+
+@app.post("/api/resync")
+async def api_resync(request: Request):
+    user_id, manager = _require_unlocked(request)
+    indexer = manager.indexers[user_id]
+    asyncio.create_task(indexer.resync_history())
+    return {"status": "resyncing", "detail": "Re-scanning your history in the background - check back shortly."}
 
 
 @app.post("/api/import-keys")
