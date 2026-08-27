@@ -6,6 +6,23 @@ account, each getting their own searchable index of their own Matrix
 message history. Nobody else - including the person running this server -
 can read it without that user's own passphrase.
 
+## Screenshots
+
+<table>
+<tr>
+<td><img src="docs/screenshots/sign-in.png" width="380" alt="Sign-in screen"><br>Sign in</td>
+<td><img src="docs/screenshots/unlock.png" width="380" alt="Vault unlock screen"><br>Unlock (after a restart)</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/search.png" width="380" alt="Search UI with range, sort, and room filters"><br>Search - range/sort/room filters, resync, key import, passphrase change</td>
+<td><img src="docs/screenshots/search-results.png" width="380" alt="Search results with highlighted matches"><br>Results with highlighted matches (redacted for this README)</td>
+</tr>
+</table>
+
+<img src="docs/screenshots/admin-panel.png" width="780" alt="Admin panel showing overview and per-user sync health">
+
+*Admin panel - deployment overview and per-user sync health (redacted for this README).*
+
 ## How login works
 
 1. A user clicks **Sign in**, which redirects them to your identity
