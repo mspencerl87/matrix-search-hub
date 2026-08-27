@@ -71,7 +71,7 @@ async def _load_or_register_client(http_session, discovery):
         return config.STATIC_CLIENT_ID, config.STATIC_CLIENT_SECRET
 
     redirect_uri = f"{config.BASE_URL}/auth/callback"
-    reg = await oidc.register_client(http_session, discovery, redirect_uri, "matrix-search-hub", config.BASE_URL)
+    reg = await oidc.register_client(http_session, discovery, redirect_uri, "matrix-search-hub", config.OAUTH_CLIENT_URI)
     client_id, client_secret = reg["client_id"], reg.get("client_secret")
     with open(config.OAUTH_CLIENT_FILE, "w") as f:
         json.dump({"client_id": client_id, "client_secret": client_secret}, f)

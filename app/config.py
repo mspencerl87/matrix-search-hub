@@ -23,6 +23,13 @@ SESSION_SECRET = os.environ["SESSION_SECRET"]
 DEVICE_NAME = os.environ.get("MATRIX_DEVICE_NAME", "matrix-search-hub")
 ELEMENT_URL = os.environ.get("ELEMENT_URL", "https://app.element.io").rstrip("/")
 
+# OAuth client metadata's client_uri is meant to be "a page with information
+# about the client" (its homepage), not the deployed instance's own address -
+# some identity providers (MAS included) validate it as a real public HTTPS
+# URL, which a local/LAN-IP/plain-HTTP BASE_URL usually isn't. Point it at
+# the project itself by default; override if you've forked this.
+OAUTH_CLIENT_URI = os.environ.get("OAUTH_CLIENT_URI") or "https://github.com/mspencerl87/matrix-search-hub"
+
 # Only needed if the identity provider has no OAuth dynamic-registration
 # endpoint and an admin had to register this app as a client manually.
 STATIC_CLIENT_ID = os.environ.get("OAUTH_CLIENT_ID")
