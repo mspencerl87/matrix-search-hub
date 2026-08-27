@@ -128,7 +128,12 @@ class UserIndexer:
             return
         log.info("[%s] sync complete, %d rooms joined", self.user_id, len(self.client.rooms))
 
-        for room_id in list(self._prev_batches.keys()):
+        # Iterate every currently-known joined room (from the client's local
+        # state, always populated) rather than _prev_batches - that dict only
+        # gets filled in when nio's sync() actually processes a response,
+        # which it silently skips if the sync token hasn't moved since the
+        # last call (see _backfill_room's fallback for the same reason).
+        for room_id in list(self.client.rooms.keys()):
             try:
                 await self._backfill_room(room_id)
             except Exception:
@@ -143,7 +148,12 @@ class UserIndexer:
     async def _backfill_room(self, room_id: str):
         room = self.client.rooms.get(room_id)
         room_name = room.display_name if room else room_id
-        token = self._prev_batches.get(room_id)
+        # _prev_batches is only populated when nio's sync() actually processes
+        # a response - if the sync token hasn't moved since last time (e.g. no
+        # new server-side activity between two resync_history() calls), nio
+        # silently no-ops the whole thing and _on_sync never fires. Fall back
+        # to the client's current position so backfill still runs.
+        token = self._prev_batches.get(room_id) or self.client.next_batch
         pages = 0
         cutoff = self._cutoff_ts_ms()
 
