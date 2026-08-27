@@ -11,6 +11,7 @@ from nio import (
     MessageDirection,
     RoomMessagesError,
     RoomMessageText,
+    SyncError,
     SyncResponse,
 )
 
@@ -118,7 +119,13 @@ class UserIndexer:
         """Full sync + backfill of every joined room. Safe to call repeatedly
         (e.g. after a key import) since inserts are idempotent on event_id."""
         log.info("[%s] performing full sync...", self.user_id)
-        await self.client.sync(timeout=30000, full_state=True)
+        resp = await self.client.sync(timeout=30000, full_state=True)
+        if isinstance(resp, SyncError):
+            log.error(
+                "[%s] full sync failed (status=%s): %s - skipping this resync attempt",
+                self.user_id, getattr(resp, "status_code", "?"), resp,
+            )
+            return
         log.info("[%s] sync complete, %d rooms joined", self.user_id, len(self.client.rooms))
 
         for room_id in list(self._prev_batches.keys()):
