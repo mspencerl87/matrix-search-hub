@@ -48,7 +48,7 @@ async def discover(session: aiohttp.ClientSession, server_name: str) -> dict:
         return await resp.json(content_type=None)
 
 
-async def register_client(session: aiohttp.ClientSession, discovery: dict, redirect_uri: str, client_name: str) -> dict:
+async def register_client(session: aiohttp.ClientSession, discovery: dict, redirect_uri: str, client_name: str, client_uri: str) -> dict:
     registration_endpoint = discovery.get("registration_endpoint")
     if not registration_endpoint:
         raise OIDCError(
@@ -58,6 +58,7 @@ async def register_client(session: aiohttp.ClientSession, discovery: dict, redir
         )
     payload = {
         "client_name": client_name,
+        "client_uri": client_uri,
         "redirect_uris": [redirect_uri],
         "response_types": ["code"],
         "grant_types": ["authorization_code", "refresh_token"],
