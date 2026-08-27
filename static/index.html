@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Matrix Search</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #15171b;
+    --panel: #1e2027;
+    --border: #2e3038;
+    --text: #e3e3e8;
+    --muted: #9092a0;
+    --accent: #0dbd8b;
+    --mark-bg: #0dbd8b55;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  header {
+    padding: 24px 16px 12px;
+    max-width: 760px;
+    margin: 0 auto;
+  }
+  .top-row { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+  h1 { font-size: 1.3rem; margin: 0; }
+  .account { font-size: 0.8rem; color: var(--muted); }
+  .account a { color: var(--accent); text-decoration: none; margin-left: 10px; }
+  .searchbar { display: flex; gap: 8px; margin-top: 14px; }
+  input[type="text"], input[type="password"], input[type="file"] {
+    padding: 12px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    font-size: 1rem;
+  }
+  input[type="text"] { flex: 1; }
+  input[type="text"]:focus, input[type="password"]:focus { outline: 2px solid var(--accent); }
+  button, .btn {
+    padding: 12px 18px;
+    border-radius: 8px;
+    border: none;
+    background: var(--accent);
+    color: #04211a;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+  }
+  .status { color: var(--muted); font-size: 0.8rem; margin-top: 8px; }
+  main { max-width: 760px; margin: 0 auto; padding: 0 16px 40px; }
+  .result {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 10px;
+  }
+  .result-meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 0.8rem; margin-bottom: 6px; }
+  .result-body { line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
+  .result-body mark { background: var(--mark-bg); color: inherit; border-radius: 3px; padding: 0 2px; }
+  .result-links { margin-top: 8px; display: flex; gap: 14px; }
+  .result-links a { color: var(--accent); font-size: 0.8rem; text-decoration: none; }
+  .result-links a:hover { text-decoration: underline; }
+  .empty { color: var(--muted); padding: 40px 0; text-align: center; }
+  .signin-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 70vh; gap: 16px; text-align: center; }
+  .signin-screen p { color: var(--muted); max-width: 420px; }
+  details.keys { margin-top: 20px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; }
+  details.keys summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
+  .keys form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+  .keys-note { color: var(--muted); font-size: 0.78rem; margin-top: 8px; }
+  #keysMsg { font-size: 0.8rem; margin-top: 8px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="signin" class="signin-screen" hidden>
+  <h1>Matrix Search</h1>
+  <p>Search your own Matrix message history. Sign in with your company account to get started - a background sync of your rooms starts automatically.</p>
+  <a class="btn" href="/auth/login">Sign in</a>
+</div>
+
+<div id="app" hidden>
+<header>
+  <div class="top-row">
+    <h1>Matrix Search</h1>
+    <div class="account"><span id="whoami"></span><a href="/auth/logout">Log out</a></div>
+  </div>
+  <div class="searchbar">
+    <input id="q" type="text" placeholder="Search your message history..." autofocus>
+    <button id="go">Search</button>
+  </div>
+  <div class="status" id="status">Loading index status...</div>
+
+  <details class="keys">
+    <summary>Encrypted rooms not showing up? Import your Element key export</summary>
+    <form id="keysForm">
+      <input type="file" id="keysFile" accept=".txt" required>
+      <input type="password" id="keysPass" placeholder="Export passphrase" required>
+      <button type="submit">Import</button>
+    </form>
+    <div class="keys-note">
+      From Element: Settings &gt; Security &amp; Privacy &gt; Export keys. This covers
+      historical messages; verify this app's session in Element (Settings &gt; Sessions)
+      for new encrypted messages to keep indexing automatically.
+    </div>
+    <div id="keysMsg"></div>
+  </details>
+</header>
+<main>
+  <div id="results" class="empty">Type something and hit search.</div>
+</main>
+</div>
+
+<script>
+const signinScreen = document.getElementById('signin');
+const appScreen = document.getElementById('app');
+const whoamiEl = document.getElementById('whoami');
+const q = document.getElementById('q');
+const go = document.getElementById('go');
+const results = document.getElementById('results');
+const statusEl = document.getElementById('status');
+const keysForm = document.getElementById('keysForm');
+const keysMsg = document.getElementById('keysMsg');
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderSnippet(snippet) {
+  const escaped = escapeHtml(snippet);
+  return escaped.replace(/\[\[/g, '<mark>').replace(/\]\]/g, '</mark>');
+}
+
+async function init() {
+  try {
+    const r = await fetch('/api/me');
+    if (r.status === 401) {
+      signinScreen.hidden = false;
+      return;
+    }
+    const j = await r.json();
+    whoamiEl.textContent = j.user_id;
+    appScreen.hidden = false;
+    loadStatus();
+    setInterval(loadStatus, 15000);
+  } catch (e) {
+    signinScreen.hidden = false;
+  }
+}
+
+async function loadStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const j = await r.json();
+    statusEl.textContent = `${j.indexed_messages} messages indexed across ${j.rooms} rooms`;
+  } catch (e) {
+    statusEl.textContent = 'Could not reach backend.';
+  }
+}
+
+async function doSearch() {
+  const query = q.value.trim();
+  if (!query) return;
+  results.innerHTML = '<div class="empty">Searching...</div>';
+  try {
+    const r = await fetch('/api/search?q=' + encodeURIComponent(query));
+    if (r.status === 401) { location.reload(); return; }
+    const j = await r.json();
+    if (!j.results.length) {
+      results.innerHTML = '<div class="empty">No results.</div>';
+      return;
+    }
+    results.innerHTML = j.results.map(row => {
+      const date = new Date(row.origin_server_ts).toLocaleString();
+      return `<div class="result">
+        <div class="result-meta"><span>${escapeHtml(row.room_name || row.room_id)} &middot; ${escapeHtml(row.sender)}</span><span>${date}</span></div>
+        <div class="result-body">${renderSnippet(row.snippet)}</div>
+        <div class="result-links">
+          <a href="${row.matrix_to_url}" target="_blank" rel="noopener">Open (matrix.to)</a>
+          <a href="${row.element_url}" target="_blank" rel="noopener">Open in Element</a>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    results.innerHTML = '<div class="empty">Search failed.</div>';
+  }
+}
+
+go.addEventListener('click', doSearch);
+q.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+
+keysForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fileInput = document.getElementById('keysFile');
+  const pass = document.getElementById('keysPass').value;
+  if (!fileInput.files.length) return;
+  const fd = new FormData();
+  fd.append('file', fileInput.files[0]);
+  fd.append('passphrase', pass);
+  keysMsg.textContent = 'Uploading...';
+  try {
+    const r = await fetch('/api/import-keys', { method: 'POST', body: fd });
+    const j = await r.json();
+    keysMsg.textContent = r.ok ? (j.detail || 'Imported.') : (j.error || 'Import failed.');
+  } catch (e) {
+    keysMsg.textContent = 'Import failed.';
+  }
+});
+
+init();
+</script>
+</body>
+</html>

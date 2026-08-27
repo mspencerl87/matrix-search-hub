@@ -1,0 +1,16 @@
+services:
+  matrix-search-hub:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      MATRIX_HOMESERVER: ${MATRIX_HOMESERVER}
+      BASE_URL: ${BASE_URL}
+      SESSION_SECRET: ${SESSION_SECRET}
+      MATRIX_DEVICE_NAME: ${MATRIX_DEVICE_NAME:-matrix-search-hub}
+      ELEMENT_URL: ${ELEMENT_URL:-https://app.element.io}
+      OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID:-}
+      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET:-}
+    restart: unless-stopped

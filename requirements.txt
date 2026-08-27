@@ -1,0 +1,6 @@
+matrix-nio[e2e]==0.24.0
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+aiohttp==3.10.10
+itsdangerous==2.2.0
+python-multipart==0.0.9
