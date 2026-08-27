@@ -2,7 +2,7 @@ import os
 
 HOMESERVER = os.environ["MATRIX_HOMESERVER"].rstrip("/")
 
-# Public URL this app is reachable at, e.g. https://matrix-search.internal.vates.tech
+# Public URL this app is reachable at, e.g. https://matrix-search.internal.example.com
 # Must exactly match the redirect_uri registered with the OAuth client (this
 # app builds it as f"{BASE_URL}/auth/callback").
 BASE_URL = os.environ["BASE_URL"].rstrip("/")
@@ -47,7 +47,7 @@ MIN_VAULT_PASSPHRASE_LENGTH = 12
 
 PENDING_TOKENS_TTL_SECONDS = 900  # time between OIDC callback and vault setup/unlock
 
-# Matrix user IDs (e.g. @spencer.leblanc:vates.tech) allowed to use the
+# Matrix user IDs (e.g. @admin:example.com) allowed to use the
 # admin panel. Empty by default - admin routes 403 for everyone until this
 # is set. Admins are just regular users who also appear here; there is no
 # separate admin credential, and admin access never grants the ability to
