@@ -16,6 +16,9 @@ from app.search_index import get_stats, search
 from app.worker_manager import WorkerManager, user_dir
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+# nio logs every individual room-state event at INFO, which drowns out
+# anything useful during a big sync/backfill - keep it to warnings and up.
+logging.getLogger("nio").setLevel(logging.WARNING)
 log = logging.getLogger("main")
 
 app = FastAPI(title="matrix-search-hub")
