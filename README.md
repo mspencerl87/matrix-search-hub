@@ -285,8 +285,10 @@ docker compose logs | grep -i "unlocked and started"    # confirms a user's vaul
 ## Admin panel
 
 Anyone whose Matrix user ID is listed in `ADMIN_USER_IDS` sees an **Admin**
-link in the search UI, leading to `/admin.html`. It shows, and only shows,
-metadata:
+link in the search UI, leading to `/admin.html`. This isn't limited to one
+person - `ADMIN_USER_IDS` takes a comma-separated list, so any number of
+people can have admin access (`ADMIN_USER_IDS=@a:example.com,@b:example.com`).
+It shows, and only shows, metadata:
 
 - Deployment overview: homeserver, base URL, OIDC issuer, OAuth client,
   retention setting.
