@@ -3,7 +3,7 @@ import os
 HOMESERVER = os.environ["MATRIX_HOMESERVER"].rstrip("/")
 
 # Full URL (with scheme) for the domain in your Matrix user IDs, e.g.
-# https://vates.tech for @you:vates.tech - used only to fetch
+# https://example.com for @you:example.com - used only to fetch
 # .well-known/matrix/client for OIDC issuer discovery. This is frequently a
 # different host than MATRIX_HOMESERVER (the resolved client-server API
 # base URL) - defaults to it for simple setups where they happen to be the

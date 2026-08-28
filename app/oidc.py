@@ -13,8 +13,8 @@ class OIDCError(Exception):
 
 async def discover(session: aiohttp.ClientSession, server_name: str) -> dict:
     # .well-known/matrix/client is hosted on the server_name (the domain in
-    # user IDs, e.g. vates.tech for @you:vates.tech) - NOT on the resolved
-    # client-server API base URL (e.g. matrix.vates.tech), which is often a
+    # user IDs, e.g. example.com for @you:example.com) - NOT on the resolved
+    # client-server API base URL (e.g. matrix.example.com), which is often a
     # different host entirely. Fetching it from the API host is a common
     # mistake since that host may still return 200 with an empty/unrelated
     # body for the path instead of a clean 404.

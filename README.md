@@ -49,8 +49,8 @@ good. If not, this app can't use your homeserver's auth - use the
 single-user `matrix-search` project instead.
 
 Note that `<your-server-name>` above (the domain in user IDs, e.g.
-`vates.tech` for `@you:vates.tech`) is frequently a **different host**
-than `MATRIX_HOMESERVER` (e.g. `matrix.vates.tech`), since `.well-known`
+`example.com` for `@you:example.com`) is frequently a **different host**
+than `MATRIX_HOMESERVER` (e.g. `matrix.example.com`), since `.well-known`
 delegation exists precisely so the client-server API can live somewhere
 else. This app needs both: `MATRIX_HOMESERVER` for actual API calls, and
 `MATRIX_SERVER_NAME` (defaults to `MATRIX_HOMESERVER` if unset) for this
