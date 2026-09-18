@@ -25,14 +25,16 @@
   }
   .page-layout {
     display: grid;
-    grid-template-columns: 220px minmax(0, 760px) 220px;
-    justify-content: center;
+    grid-template-columns: minmax(160px, 1fr) minmax(0, 760px) minmax(160px, 1fr);
     gap: 24px;
-    max-width: 1240px;
+    max-width: 1600px;
     margin: 0 auto;
+    padding: 0 32px;
   }
   .center-column { min-width: 0; }
-  .side-panel { padding: 24px 0; }
+  .side-panel { padding: 24px 0; max-width: 260px; }
+  .side-panel.side-left { justify-self: start; }
+  .side-panel.side-right { justify-self: end; }
   .side-panel h2 {
     font-size: 0.72rem;
     text-transform: uppercase;
