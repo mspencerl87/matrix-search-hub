@@ -6,6 +6,7 @@ import time
 from nio import (
     AsyncClient,
     AsyncClientConfig,
+    DirectRoomsResponse,
     MatrixRoom,
     MegolmEvent,
     MessageDirection,
@@ -16,7 +17,7 @@ from nio import (
 )
 
 from app import control_store
-from app.search_index import add_message, get_stats, prune_older_than
+from app.search_index import add_message, get_stats, prune_older_than, upsert_room
 
 log = logging.getLogger("matrix_client")
 
@@ -167,6 +168,8 @@ class UserIndexer:
         self.last_error = None
         log.info("[%s] sync complete, %d rooms joined", self.user_id, len(self.client.rooms))
 
+        await self._refresh_room_classification()
+
         # Iterate every currently-known joined room (from the client's local
         # state, always populated) rather than _prev_batches - that dict only
         # gets filled in when nio's sync() actually processes a response,
@@ -184,6 +187,27 @@ class UserIndexer:
             self._undecryptable,
         )
         self._update_stats_cache()
+
+    async def _refresh_room_classification(self):
+        """Records which joined rooms are DMs vs. group rooms, per m.direct
+        account data (the actual source of truth Matrix uses for this - not
+        guessable from membership count alone)."""
+        try:
+            resp = await self.client.list_direct_rooms()
+        except Exception:
+            log.exception("[%s] list_direct_rooms failed", self.user_id)
+            return
+
+        direct_room_ids: set[str] = set()
+        if isinstance(resp, DirectRoomsResponse):
+            for room_ids in resp.rooms.values():
+                direct_room_ids.update(room_ids)
+        # else: DirectRoomsErrorResponse just means no rooms have ever been
+        # marked with m.direct - direct_room_ids stays empty, which is correct.
+
+        for room_id, room in self.client.rooms.items():
+            upsert_room(self.conn, room_id, room.display_name, room_id in direct_room_ids, commit=False)
+        self.conn.commit()
 
     async def _backfill_room(self, room_id: str):
         room = self.client.rooms.get(room_id)

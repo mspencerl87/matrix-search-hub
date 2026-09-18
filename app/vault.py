@@ -40,6 +40,17 @@ CREATE TABLE IF NOT EXISTS oauth (
     refresh_token TEXT,
     expires_at REAL
 );
+
+-- Room-level metadata, kept separate from messages since is_direct is a
+-- property of the room, not of any individual message. Whether a room is
+-- a DM is decided by m.direct account data, not by membership count, so
+-- it's fetched via list_direct_rooms() and cached here rather than
+-- guessed at from room state.
+CREATE TABLE IF NOT EXISTS rooms (
+    room_id TEXT PRIMARY KEY,
+    room_name TEXT,
+    is_direct INTEGER NOT NULL DEFAULT 0
+);
 """
 
 

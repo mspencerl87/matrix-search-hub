@@ -23,6 +23,41 @@
     color: var(--text);
     font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
+  .page-layout {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 760px) 220px;
+    justify-content: center;
+    gap: 24px;
+    max-width: 1240px;
+    margin: 0 auto;
+  }
+  .center-column { min-width: 0; }
+  .side-panel { padding: 24px 0; }
+  .side-panel h2 {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin: 0 0 10px;
+  }
+  .conversation-list { display: flex; flex-direction: column; gap: 8px; }
+  .conversation-item {
+    display: block;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    text-decoration: none;
+    color: var(--text);
+  }
+  .conversation-item:hover { border-color: var(--accent); }
+  .conv-name { font-size: 0.82rem; font-weight: 600; display: block; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .conv-preview { font-size: 0.75rem; color: var(--muted); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .conv-time { font-size: 0.68rem; color: var(--muted); display: block; margin-top: 4px; }
+  .side-empty { color: var(--muted); font-size: 0.78rem; }
+  @media (max-width: 1100px) {
+    .page-layout { display: block; }
+    .side-panel { display: none; }
+  }
   header { padding: 24px 16px 12px; max-width: 760px; margin: 0 auto; }
   .top-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
   .brand { display: flex; align-items: center; gap: 10px; }
@@ -150,6 +185,12 @@
 </div>
 
 <div id="app" hidden>
+<div class="page-layout">
+<aside class="side-panel side-left">
+  <h2>Recent PMs</h2>
+  <div id="recentDirect" class="conversation-list"><span class="side-empty">Loading...</span></div>
+</aside>
+<div class="center-column">
 <header>
   <div class="top-row">
     <div class="brand">
@@ -211,6 +252,12 @@
 <main>
   <div id="results" class="empty">Type something and hit search.</div>
 </main>
+</div>
+<aside class="side-panel side-right">
+  <h2>Recent Rooms</h2>
+  <div id="recentRooms" class="conversation-list"><span class="side-empty">Loading...</span></div>
+</aside>
+</div>
 <footer class="app-footer">
   Built by Spencer LeBlanc &middot;
   <a href="mailto:mspencerl87@gmail.com">mspencerl87@gmail.com</a> &middot;
@@ -303,8 +350,41 @@ async function enterApp() {
   await loadRooms();
   loadStatus();
   loadOrgMetrics();
+  loadRecentConversations();
   setInterval(loadStatus, 15000);
   setInterval(loadOrgMetrics, 15000);
+  setInterval(loadRecentConversations, 30000);
+}
+
+function renderConversationList(el, items) {
+  if (!items.length) {
+    el.innerHTML = '<span class="side-empty">Nothing indexed yet.</span>';
+    return;
+  }
+  el.innerHTML = items.map(item => {
+    const date = new Date(item.origin_server_ts).toLocaleString();
+    const preview = item.sender ? `${escapeHtml(item.sender)}: ${escapeHtml(item.body || '')}` : escapeHtml(item.body || '');
+    return `<a class="conversation-item" href="${item.element_url}" target="_blank" rel="noopener">
+      <span class="conv-name">${escapeHtml(item.room_name)}</span>
+      <span class="conv-preview">${preview}</span>
+      <span class="conv-time">${date}</span>
+    </a>`;
+  }).join('');
+}
+
+async function loadRecentConversations() {
+  const directEl = document.getElementById('recentDirect');
+  const roomsEl = document.getElementById('recentRooms');
+  try {
+    const r = await fetch('/api/recent-conversations?limit=10');
+    if (!r.ok) return;
+    const j = await r.json();
+    renderConversationList(directEl, j.direct);
+    renderConversationList(roomsEl, j.rooms);
+  } catch (e) {
+    directEl.innerHTML = '<span class="side-empty">Could not load.</span>';
+    roomsEl.innerHTML = '<span class="side-empty">Could not load.</span>';
+  }
 }
 
 async function loadOrgMetrics() {

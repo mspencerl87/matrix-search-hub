@@ -171,6 +171,24 @@ Implementation notes, since the design choices here matter for accuracy:
   count - a room with 20 members indexing it counts 20 times. Treat both
   numbers as a usage/volume indicator, not a precise inventory.
 
+## Recent conversations
+
+The search page shows your 10 most recently active direct messages (left
+sidebar) and 10 most recently active rooms (right sidebar), each linking
+straight into Element. This is per-user - it only ever reads from your own
+unlocked vault, same as search itself.
+
+DM vs. room classification comes from Matrix's own `m.direct` account
+data (via nio's `list_direct_rooms()`), refreshed on every full sync - the
+same signal Element itself uses, not a guess based on member count. A room
+that hasn't been classified yet (e.g. indexed before this feature existed,
+not yet through a fresh sync) defaults to the "Rooms" bucket rather than
+risking miscategorizing a real DM. Run **Resync now** to refresh
+classification immediately instead of waiting for the next automatic sync.
+
+Both sidebars hide below ~1100px viewport width to keep the search column
+usable on narrower screens/tablets.
+
 ## Setup
 
 1. Copy the env file:
@@ -435,6 +453,9 @@ was there before; **Remove logo** clears it back to no logo.
   locked. `sort` is one of `relevance` (default), `newest`, or `oldest`;
   `room_id` (optional) restricts to one room.
 - `GET /api/status` — indexed message/room counts; 423 if locked.
+- `GET /api/recent-conversations?limit=10` — the logged-in user's most
+  recently active DMs and rooms (separately bucketed, each with a preview
+  of the last message and links into Element/matrix.to); 423 if locked.
 - `POST /api/resync` — re-runs a full sync + backfill in the background
   for the logged-in user, without needing a key import. Useful if you
   suspect indexing stalled or missed something.

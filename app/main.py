@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app import auth, branding, config, control_store, oidc, vault
-from app.search_index import SORT_ORDERS, clear_all, get_stats, list_rooms, search
+from app.search_index import SORT_ORDERS, clear_all, get_stats, list_rooms, recent_conversations, search
 from app.worker_manager import WorkerManager, user_dir
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -349,6 +349,18 @@ async def api_rooms(request: Request):
     user_id, manager = _require_unlocked(request)
     conn = manager.vault_conns[user_id]
     return {"rooms": list_rooms(conn)}
+
+
+@app.get("/api/recent-conversations")
+async def api_recent_conversations(request: Request, limit: int = 10):
+    user_id, manager = _require_unlocked(request)
+    conn = manager.vault_conns[user_id]
+    result = recent_conversations(conn, limit=limit)
+    for bucket in (result["direct"], result["rooms"]):
+        for row in bucket:
+            row["matrix_to_url"] = f"https://matrix.to/#/{row['room_id']}"
+            row["element_url"] = f"{config.ELEMENT_URL}/#/room/{row['room_id']}"
+    return result
 
 
 @app.get("/api/search")

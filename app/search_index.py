@@ -72,3 +72,52 @@ def prune_older_than(conn, cutoff_ts_ms: int):
     cur = conn.execute("DELETE FROM messages WHERE origin_server_ts < ?", (cutoff_ts_ms,))
     conn.commit()
     return cur.rowcount
+
+
+def upsert_room(conn, room_id: str, room_name: str, is_direct: bool, commit: bool = True):
+    conn.execute(
+        """
+        INSERT INTO rooms (room_id, room_name, is_direct) VALUES (?, ?, ?)
+        ON CONFLICT(room_id) DO UPDATE SET room_name = excluded.room_name, is_direct = excluded.is_direct
+        """,
+        (room_id, room_name, int(is_direct)),
+    )
+    if commit:
+        conn.commit()
+
+
+def recent_conversations(conn, limit: int = 10):
+    """Most recently active room per category, each with a preview of its
+    last message. is_direct comes from the rooms table (set via
+    list_direct_rooms()); a room we haven't classified yet defaults to
+    "not a DM" rather than risking miscategorizing a real conversation."""
+    cur = conn.execute(
+        """
+        WITH ranked AS (
+            SELECT m.room_id, m.room_name, m.sender, m.body, m.origin_server_ts,
+                   COALESCE(r.is_direct, 0) AS is_direct,
+                   ROW_NUMBER() OVER (PARTITION BY m.room_id ORDER BY m.origin_server_ts DESC) AS rn
+            FROM messages m
+            LEFT JOIN rooms r ON r.room_id = m.room_id
+        )
+        SELECT room_id, room_name, sender, body, origin_server_ts, is_direct
+        FROM ranked
+        WHERE rn = 1
+        ORDER BY origin_server_ts DESC
+        """
+    )
+    direct, rooms = [], []
+    for room_id, room_name, sender, body, ts, is_direct in cur.fetchall():
+        item = {
+            "room_id": room_id,
+            "room_name": room_name or room_id,
+            "sender": sender,
+            "body": body,
+            "origin_server_ts": ts,
+        }
+        bucket = direct if is_direct else rooms
+        if len(bucket) < limit:
+            bucket.append(item)
+        if len(direct) >= limit and len(rooms) >= limit:
+            break
+    return {"direct": direct, "rooms": rooms}
