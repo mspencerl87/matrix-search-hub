@@ -4,11 +4,13 @@ import logging
 import os
 import secrets
 import time
+from urllib.parse import quote, urlparse
 
 import aiohttp
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from nio import ThumbnailResponse
 from pydantic import BaseModel
 
 from app import auth, branding, config, control_store, oidc, vault
@@ -360,7 +362,30 @@ async def api_recent_conversations(request: Request, limit: int = 10):
         for row in bucket:
             row["matrix_to_url"] = f"https://matrix.to/#/{row['room_id']}"
             row["element_url"] = f"{config.ELEMENT_URL}/#/room/{row['room_id']}"
+            avatar_mxc = row.pop("avatar_mxc", None)
+            row["avatar_url"] = f"/api/avatar?mxc={quote(avatar_mxc, safe='')}" if avatar_mxc else None
     return result
+
+
+AVATAR_SIZE = 48
+
+
+@app.get("/api/avatar")
+async def api_avatar(request: Request, mxc: str):
+    """Proxies a Matrix avatar thumbnail through this user's own session -
+    avatars live on the homeserver's media repo, not this app, and modern
+    homeservers require an authenticated request to fetch them."""
+    user_id, manager = _require_unlocked(request)
+    parsed = urlparse(mxc)
+    if parsed.scheme != "mxc" or not parsed.netloc or not parsed.path.strip("/"):
+        raise HTTPException(status_code=400, detail="invalid mxc URI")
+
+    indexer = manager.indexers[user_id]
+    resp = await indexer.client.thumbnail(parsed.netloc, parsed.path.strip("/"), AVATAR_SIZE, AVATAR_SIZE)
+    if not isinstance(resp, ThumbnailResponse):
+        raise HTTPException(status_code=404, detail="avatar not available")
+
+    return Response(content=resp.body, media_type=resp.content_type, headers={"Cache-Control": "private, max-age=3600"})
 
 
 @app.get("/api/search")

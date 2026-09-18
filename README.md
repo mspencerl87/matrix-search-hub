@@ -188,6 +188,16 @@ not yet through a fresh sync) defaults to the "Rooms" bucket rather than
 risking miscategorizing a real DM. Run **Resync now** to refresh
 classification immediately instead of waiting for the next automatic sync.
 
+Each entry also shows an avatar - the room's own icon for a group room, or
+the other person's profile picture for a DM (nio's `gen_avatar_url`, the
+same logic Element uses to decide which to show). Avatars are fetched
+through `/api/avatar`, which proxies the request through your own unlocked
+session rather than hitting the homeserver's media repo directly from the
+browser - modern homeservers require an authenticated request for media,
+and this keeps that authentication server-side instead of exposing your
+access token to the browser. A room with no avatar set falls back to a
+plain initial.
+
 Both sidebars hide below ~1100px viewport width to keep the search column
 usable on narrower screens/tablets.
 
@@ -465,7 +475,11 @@ was there before; **Remove logo** clears it back to no logo.
 - `GET /api/status` — indexed message/room counts; 423 if locked.
 - `GET /api/recent-conversations?limit=10` — the logged-in user's most
   recently active DMs and rooms (separately bucketed, each with a preview
-  of the last message and links into Element/matrix.to); 423 if locked.
+  of the last message, an `avatar_url` pointing at `/api/avatar`, and links
+  into Element/matrix.to); 423 if locked.
+- `GET /api/avatar?mxc=mxc://...` — proxies a Matrix avatar thumbnail
+  through the logged-in user's own session; 400 for a malformed `mxc`
+  value, 404 if the homeserver has no thumbnail for it, 423 if locked.
 - `POST /api/resync` — re-runs a full sync + backfill in the background
   for the logged-in user, without needing a key import. Useful if you
   suspect indexing stalled or missed something.

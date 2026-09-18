@@ -44,7 +44,9 @@
   }
   .conversation-list { display: flex; flex-direction: column; gap: 8px; }
   .conversation-item {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 10px;
     padding: 10px 12px;
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -52,6 +54,24 @@
     color: var(--text);
   }
   .conversation-item:hover { border-color: var(--accent); }
+  .conv-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: var(--panel);
+  }
+  .conv-avatar-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #04211a;
+    background: var(--accent);
+  }
+  .conv-text { min-width: 0; flex: 1; }
   .conv-name { font-size: 0.82rem; font-weight: 600; display: block; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .conv-preview { font-size: 0.75rem; color: var(--muted); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .conv-time { font-size: 0.68rem; color: var(--muted); display: block; margin-top: 4px; }
@@ -358,6 +378,11 @@ async function enterApp() {
   setInterval(loadRecentConversations, 30000);
 }
 
+function avatarInitial(name) {
+  const trimmed = (name || '').trim();
+  return trimmed ? trimmed.charAt(0).toUpperCase() : '?';
+}
+
 function renderConversationList(el, items) {
   if (!items.length) {
     el.innerHTML = '<span class="side-empty">Nothing indexed yet.</span>';
@@ -366,10 +391,18 @@ function renderConversationList(el, items) {
   el.innerHTML = items.map(item => {
     const date = new Date(item.origin_server_ts).toLocaleString();
     const preview = item.sender ? `${escapeHtml(item.sender)}: ${escapeHtml(item.body || '')}` : escapeHtml(item.body || '');
+    const initial = escapeHtml(avatarInitial(item.room_name));
+    const fallback = `<span class="conv-avatar conv-avatar-fallback"${item.avatar_url ? ' style="display:none;"' : ''}>${initial}</span>`;
+    const avatar = item.avatar_url
+      ? `<img class="conv-avatar" src="${escapeHtml(item.avatar_url)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">${fallback}`
+      : fallback;
     return `<a class="conversation-item" href="${item.element_url}" target="_blank" rel="noopener">
-      <span class="conv-name">${escapeHtml(item.room_name)}</span>
-      <span class="conv-preview">${preview}</span>
-      <span class="conv-time">${date}</span>
+      ${avatar}
+      <span class="conv-text">
+        <span class="conv-name">${escapeHtml(item.room_name)}</span>
+        <span class="conv-preview">${preview}</span>
+        <span class="conv-time">${date}</span>
+      </span>
     </a>`;
   }).join('');
 }

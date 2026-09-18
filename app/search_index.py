@@ -74,13 +74,16 @@ def prune_older_than(conn, cutoff_ts_ms: int):
     return cur.rowcount
 
 
-def upsert_room(conn, room_id: str, room_name: str, is_direct: bool, commit: bool = True):
+def upsert_room(conn, room_id: str, room_name: str, is_direct: bool, avatar_mxc: str | None = None, commit: bool = True):
     conn.execute(
         """
-        INSERT INTO rooms (room_id, room_name, is_direct) VALUES (?, ?, ?)
-        ON CONFLICT(room_id) DO UPDATE SET room_name = excluded.room_name, is_direct = excluded.is_direct
+        INSERT INTO rooms (room_id, room_name, is_direct, avatar_mxc) VALUES (?, ?, ?, ?)
+        ON CONFLICT(room_id) DO UPDATE SET
+            room_name = excluded.room_name,
+            is_direct = excluded.is_direct,
+            avatar_mxc = excluded.avatar_mxc
         """,
-        (room_id, room_name, int(is_direct)),
+        (room_id, room_name, int(is_direct), avatar_mxc),
     )
     if commit:
         conn.commit()
@@ -95,25 +98,26 @@ def recent_conversations(conn, limit: int = 10):
         """
         WITH ranked AS (
             SELECT m.room_id, m.room_name, m.sender, m.body, m.origin_server_ts,
-                   COALESCE(r.is_direct, 0) AS is_direct,
+                   COALESCE(r.is_direct, 0) AS is_direct, r.avatar_mxc,
                    ROW_NUMBER() OVER (PARTITION BY m.room_id ORDER BY m.origin_server_ts DESC) AS rn
             FROM messages m
             LEFT JOIN rooms r ON r.room_id = m.room_id
         )
-        SELECT room_id, room_name, sender, body, origin_server_ts, is_direct
+        SELECT room_id, room_name, sender, body, origin_server_ts, is_direct, avatar_mxc
         FROM ranked
         WHERE rn = 1
         ORDER BY origin_server_ts DESC
         """
     )
     direct, rooms = [], []
-    for room_id, room_name, sender, body, ts, is_direct in cur.fetchall():
+    for room_id, room_name, sender, body, ts, is_direct, avatar_mxc in cur.fetchall():
         item = {
             "room_id": room_id,
             "room_name": room_name or room_id,
             "sender": sender,
             "body": body,
             "origin_server_ts": ts,
+            "avatar_mxc": avatar_mxc,
         }
         bucket = direct if is_direct else rooms
         if len(bucket) < limit:

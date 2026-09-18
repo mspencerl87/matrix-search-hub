@@ -45,13 +45,26 @@ CREATE TABLE IF NOT EXISTS oauth (
 -- property of the room, not of any individual message. Whether a room is
 -- a DM is decided by m.direct account data, not by membership count, so
 -- it's fetched via list_direct_rooms() and cached here rather than
--- guessed at from room state.
+-- guessed at from room state. avatar_mxc is an mxc:// content URI (nio's
+-- gen_avatar_url - the room's own avatar if set, otherwise the other
+-- member's for a DM), resolved to an actual image via /api/avatar.
 CREATE TABLE IF NOT EXISTS rooms (
     room_id TEXT PRIMARY KEY,
     room_name TEXT,
-    is_direct INTEGER NOT NULL DEFAULT 0
+    is_direct INTEGER NOT NULL DEFAULT 0,
+    avatar_mxc TEXT
 );
 """
+
+
+def _migrate(conn):
+    """Adds columns to tables that already existed before that column was
+    introduced - CREATE TABLE IF NOT EXISTS above is a no-op against an
+    existing table, so this covers vaults created by an older version."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(rooms)").fetchall()}
+    if "avatar_mxc" not in cols:
+        conn.execute("ALTER TABLE rooms ADD COLUMN avatar_mxc TEXT")
+        conn.commit()
 
 
 class VaultError(Exception):
@@ -90,6 +103,7 @@ def open_vault(user_id: str, passphrase: str):
 
     conn.executescript(SCHEMA)
     conn.commit()
+    _migrate(conn)
     if is_new:
         pass  # nothing further to seed - oauth row gets inserted by set_oauth()
     return conn

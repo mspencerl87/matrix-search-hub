@@ -206,7 +206,9 @@ class UserIndexer:
         # marked with m.direct - direct_room_ids stays empty, which is correct.
 
         for room_id, room in self.client.rooms.items():
-            upsert_room(self.conn, room_id, room.display_name, room_id in direct_room_ids, commit=False)
+            upsert_room(
+                self.conn, room_id, room.display_name, room_id in direct_room_ids, room.gen_avatar_url, commit=False
+            )
         self.conn.commit()
 
     async def _backfill_room(self, room_id: str):
