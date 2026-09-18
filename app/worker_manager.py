@@ -17,11 +17,12 @@ class WorkerManager:
     vault can only be opened with their passphrase, so every restart leaves
     everyone locked until they visit the app and unlock again."""
 
-    def __init__(self, http_session, discovery, client_id, client_secret):
+    def __init__(self, http_session, discovery, client_id, client_secret, control_conn=None):
         self.http_session = http_session
         self.discovery = discovery
         self.client_id = client_id
         self.client_secret = client_secret
+        self.control_conn = control_conn
         self.indexers: dict[str, UserIndexer] = {}
         self.tasks: dict[str, asyncio.Task] = {}
         self.vault_conns: dict[str, object] = {}
@@ -35,7 +36,7 @@ class WorkerManager:
             return
         self.vault_conns[user_id] = vault_conn
         store_path = os.path.join(user_dir(user_id), "nio_store")
-        indexer = UserIndexer(user_id, device_id, access_token, store_path, vault_conn, config)
+        indexer = UserIndexer(user_id, device_id, access_token, store_path, vault_conn, config, self.control_conn)
         self.indexers[user_id] = indexer
         self.tasks[user_id] = asyncio.create_task(self._run_worker(user_id, indexer))
         log.info("Unlocked and started sync worker for %s", user_id)

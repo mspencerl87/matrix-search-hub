@@ -58,7 +58,9 @@ async def startup():
     app_state["client_secret"] = client_secret
 
     app_state["control_conn"] = control_store.init_db(config.CONTROL_DB_PATH)
-    app_state["manager"] = WorkerManager(http_session, discovery, client_id, client_secret)
+    app_state["manager"] = WorkerManager(
+        http_session, discovery, client_id, client_secret, app_state["control_conn"]
+    )
 
     log.info(
         "Startup complete. No user data is decrypted until each user unlocks their "
@@ -454,6 +456,8 @@ async def api_admin_users(request: Request):
                 "unlocked": unlocked,
                 "stats": stats,
                 "health": health,
+                "last_known_messages": u["last_known_messages"],
+                "last_known_rooms": u["last_known_rooms"],
             }
         )
     return {"users": rows}

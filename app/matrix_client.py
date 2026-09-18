@@ -15,9 +15,13 @@ from nio import (
     SyncResponse,
 )
 
-from app.search_index import add_message, prune_older_than
+from app import control_store
+from app.search_index import add_message, get_stats, prune_older_than
 
 log = logging.getLogger("matrix_client")
+
+STATS_CACHE_INTERVAL_SECONDS = 300  # keeps org-wide totals fresh even if
+# nobody has the search page open to trigger a write via /api/status
 
 
 class UserIndexer:
@@ -28,11 +32,12 @@ class UserIndexer:
     token+device_id it should just start using, never calling nio's login().
     """
 
-    def __init__(self, user_id: str, device_id: str, access_token: str, store_path: str, conn, cfg):
+    def __init__(self, user_id: str, device_id: str, access_token: str, store_path: str, conn, cfg, control_conn=None):
         self.user_id = user_id
         self.device_id = device_id
         self.conn = conn
         self.cfg = cfg
+        self.control_conn = control_conn
         self._prev_batches: dict[str, str] = {}
         self._undecryptable = 0
         self._stop = False
@@ -96,8 +101,25 @@ class UserIndexer:
                 self.user_id, room_id, len(room_info.timeline.events), room_info.timeline.limited,
             )
 
+    def _update_stats_cache(self):
+        if self.control_conn is None:
+            return
+        try:
+            stats = get_stats(self.conn)
+            control_store.update_user_stats_cache(
+                self.control_conn, self.user_id, stats["indexed_messages"], stats["rooms"]
+            )
+        except Exception:
+            log.exception("[%s] failed to update cached stats", self.user_id)
+
+    async def _stats_cache_loop(self):
+        while not self._stop:
+            await asyncio.sleep(STATS_CACHE_INTERVAL_SECONDS)
+            self._update_stats_cache()
+
     async def run(self):
         asyncio.create_task(self._prune_loop())
+        asyncio.create_task(self._stats_cache_loop())
         await self.resync_history()
         while not self._stop:
             try:
@@ -161,6 +183,7 @@ class UserIndexer:
             self.user_id,
             self._undecryptable,
         )
+        self._update_stats_cache()
 
     async def _backfill_room(self, room_id: str):
         room = self.client.rooms.get(room_id)
@@ -214,4 +237,5 @@ class UserIndexer:
 
     async def close(self):
         self._stop = True
+        self._update_stats_cache()
         await self.client.close()

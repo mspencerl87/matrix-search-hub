@@ -71,8 +71,20 @@ def get_user(conn, user_id: str):
 
 
 def all_users(conn):
-    cur = conn.execute("SELECT user_id, device_id, created_at FROM users ORDER BY created_at DESC")
-    return [{"user_id": r[0], "device_id": r[1], "created_at": r[2]} for r in cur.fetchall()]
+    cur = conn.execute(
+        "SELECT user_id, device_id, created_at, last_known_messages, last_known_rooms "
+        "FROM users ORDER BY created_at DESC"
+    )
+    return [
+        {
+            "user_id": r[0],
+            "device_id": r[1],
+            "created_at": r[2],
+            "last_known_messages": r[3],
+            "last_known_rooms": r[4],
+        }
+        for r in cur.fetchall()
+    ]
 
 
 def delete_user(conn, user_id: str):

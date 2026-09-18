@@ -232,7 +232,11 @@ function renderHealth(health) {
 function renderRow(u) {
   const vaultPill = u.vault_exists ? '<span class="pill on">set up</span>' : '<span class="pill none">not set up</span>';
   const statusPill = u.unlocked ? '<span class="pill on">unlocked</span>' : '<span class="pill off">locked</span>';
-  const indexed = u.stats ? `${u.stats.indexed_messages} msgs / ${u.stats.rooms} rooms` : '-';
+  const indexed = u.stats
+    ? `${u.stats.indexed_messages} msgs / ${u.stats.rooms} rooms`
+    : (u.last_known_messages != null
+        ? `<span style="color:var(--muted)">${u.last_known_messages} msgs / ${u.last_known_rooms} rooms (last known)</span>`
+        : '-');
   const since = new Date(u.created_at * 1000).toLocaleDateString();
   const lockBtn = u.unlocked ? `<button data-lock="${escapeHtml(u.user_id)}">Lock</button>` : '';
   const clearBtn = u.unlocked ? `<button data-clear="${escapeHtml(u.user_id)}">Clear index</button>` : '';
