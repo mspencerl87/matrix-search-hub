@@ -1,6 +1,9 @@
 services:
   matrix-search-hub:
-    build: .
+    image: mspencerl87/matrix-search-hub:latest
+    # Building from source instead of pulling the published image? Comment
+    # out the "image" line above and uncomment this one:
+    # build: .
     ports:
       - "8080:8080"
     volumes:

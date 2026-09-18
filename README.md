@@ -1,5 +1,7 @@
 # matrix-search-hub
 
+[![Docker Pulls](https://img.shields.io/docker/pulls/mspencerl87/matrix-search-hub)](https://hub.docker.com/r/mspencerl87/matrix-search-hub)
+
 A centralized, multi-user version of [matrix-search](https://github.com/mspencerl87/matrix-search):
 one deployment that any employee can sign into with their own company
 account, each getting their own searchable index of their own Matrix
@@ -226,12 +228,20 @@ usable on narrower screens/tablets.
 5. Optionally adjust `RETENTION_MONTHS` (default `12`) and set
    `ADMIN_USER_IDS` (comma-separated) if anyone should have admin access.
 
-6. Build and start:
+6. Start it:
 
    ```bash
-   docker compose up -d --build
+   docker compose up -d
    docker compose logs -f
    ```
+
+   By default this pulls the prebuilt image from
+   [Docker Hub](https://hub.docker.com/r/mspencerl87/matrix-search-hub)
+   (published automatically from this repo's `master` branch). If you'd
+   rather build from source - to audit exactly what's running, or to test
+   a local change - edit `docker-compose.yml`: comment out the `image:`
+   line and uncomment `build: .`, then run `docker compose up -d --build`
+   instead.
 
    On first startup you should see `Discovered OIDC issuer: ...` and
    `Dynamically registered new OAuth client ...`. If registration fails
