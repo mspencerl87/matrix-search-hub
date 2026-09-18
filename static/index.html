@@ -24,7 +24,8 @@
     font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
   header { padding: 24px 16px 12px; max-width: 760px; margin: 0 auto; }
-  .top-row { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+  .top-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .brand { display: flex; align-items: center; gap: 10px; }
   h1 { font-size: 1.3rem; margin: 0; }
   .account { font-size: 0.8rem; color: var(--muted); }
   .account a, button.link { color: var(--accent); text-decoration: none; margin-left: 10px; background: none; border: none; cursor: pointer; font-size: inherit; padding: 0; }
@@ -103,6 +104,7 @@
   .center-screen form { display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 320px; margin-top: 6px; }
   .field-error { color: var(--danger); font-size: 0.85rem; min-height: 1.2em; }
   .company-logo { max-height: 80px; max-width: 280px; object-fit: contain; }
+  .company-logo-inline { max-height: 32px; max-width: 120px; object-fit: contain; }
   details.keys { margin-top: 20px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; }
   details.keys summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
   .keys form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
@@ -114,7 +116,7 @@
 <body>
 
 <div id="signin" class="center-screen" hidden>
-  <img id="companyLogo" class="company-logo" hidden alt="Company logo">
+  <img class="company-logo-img company-logo" hidden alt="Company logo">
   <h1>Matrix Search</h1>
   <p>Search your own Matrix message history. Sign in with your company account to get started.</p>
   <a class="btn" href="/auth/login">Sign in</a>
@@ -137,6 +139,7 @@
 </div>
 
 <div id="vaultUnlock" class="center-screen" hidden>
+  <img class="company-logo-img company-logo" hidden alt="Company logo">
   <h1>Unlock your search index</h1>
   <p>Enter your passphrase to resume syncing and searching your messages.</p>
   <form id="unlockForm">
@@ -149,7 +152,10 @@
 <div id="app" hidden>
 <header>
   <div class="top-row">
-    <h1>Matrix Search</h1>
+    <div class="brand">
+      <img class="company-logo-img company-logo-inline" hidden alt="Company logo">
+      <h1>Matrix Search</h1>
+    </div>
     <div class="account">
       <span id="whoami"></span>
       <a href="/admin.html" id="adminLink" hidden>Admin</a>
@@ -251,9 +257,10 @@ async function loadCompanyLogo() {
     const r = await fetch('/api/branding');
     const j = await r.json();
     if (j.logo_url) {
-      const img = document.getElementById('companyLogo');
-      img.src = j.logo_url;
-      img.hidden = false;
+      document.querySelectorAll('.company-logo-img').forEach(img => {
+        img.src = j.logo_url;
+        img.hidden = false;
+      });
     }
   } catch (e) {
     // no logo uploaded, or branding endpoint unreachable - just skip it
