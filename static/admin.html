@@ -58,6 +58,23 @@
     </div>
 
     <div class="panel">
+      <h2>Branding</h2>
+      <div id="currentLogoPreview" style="margin-bottom:12px;"></div>
+      <form id="logoForm" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <input type="file" id="logoFile" accept=".png,.jpg,.jpeg,.webp,.svg" required
+               style="color:var(--muted); font-size:0.85rem;">
+        <button type="submit">Upload logo</button>
+        <button type="button" class="danger" id="removeLogoBtn">Remove logo</button>
+      </form>
+      <div id="logoMsg" style="font-size:0.78rem; margin-top:6px;"></div>
+      <p style="color:var(--muted); font-size:0.78rem; margin-top:12px;">
+        Shown on the sign-in page, before anyone logs in. PNG, JPG, WEBP, or
+        SVG, up to 3MB - no need to hit an exact size, it's scaled down to
+        fit a small header area regardless of its native dimensions.
+      </p>
+    </div>
+
+    <div class="panel">
       <h2>Admins</h2>
       <table>
         <thead>
@@ -114,12 +131,54 @@ async function init() {
     const j = await r.json();
     renderOverview(j);
     document.getElementById('content').hidden = false;
+    await loadLogoPreview();
     await loadAdmins();
     await loadUsers();
   } catch (e) {
     document.getElementById('denied').hidden = false;
   }
 }
+
+async function loadLogoPreview() {
+  const el = document.getElementById('currentLogoPreview');
+  try {
+    const r = await fetch('/api/branding');
+    const j = await r.json();
+    el.innerHTML = j.logo_url
+      ? `<img src="${j.logo_url}?t=${Date.now()}" style="max-height:60px; max-width:220px;" alt="Current logo">`
+      : '<span style="color:var(--muted); font-size:0.85rem;">No logo uploaded yet.</span>';
+  } catch (e) {
+    el.innerHTML = '<span style="color:var(--muted); font-size:0.85rem;">Could not load logo preview.</span>';
+  }
+}
+
+document.getElementById('logoForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fileInput = document.getElementById('logoFile');
+  const msgEl = document.getElementById('logoMsg');
+  if (!fileInput.files.length) return;
+  const fd = new FormData();
+  fd.append('file', fileInput.files[0]);
+  msgEl.textContent = 'Uploading...';
+  try {
+    const r = await fetch('/api/admin/logo', { method: 'POST', body: fd });
+    const j = await r.json();
+    msgEl.textContent = r.ok ? 'Logo updated.' : (j.error || 'Upload failed.');
+    if (r.ok) {
+      fileInput.value = '';
+      await loadLogoPreview();
+    }
+  } catch (e) {
+    msgEl.textContent = 'Upload failed.';
+  }
+});
+
+document.getElementById('removeLogoBtn').addEventListener('click', async () => {
+  if (!confirm('Remove the company logo from the sign-in page?')) return;
+  await fetch('/api/admin/logo/remove', { method: 'POST' });
+  document.getElementById('logoMsg').textContent = '';
+  await loadLogoPreview();
+});
 
 async function loadAdmins() {
   const r = await fetch('/api/admin/admins');

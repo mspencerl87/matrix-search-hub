@@ -91,6 +91,7 @@
   .center-screen p { color: var(--muted); max-width: 440px; margin: 0; }
   .center-screen form { display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 320px; margin-top: 6px; }
   .field-error { color: var(--danger); font-size: 0.85rem; min-height: 1.2em; }
+  .company-logo { max-height: 80px; max-width: 280px; object-fit: contain; }
   details.keys { margin-top: 20px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; }
   details.keys summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
   .keys form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
@@ -102,6 +103,7 @@
 <body>
 
 <div id="signin" class="center-screen" hidden>
+  <img id="companyLogo" class="company-logo" hidden alt="Company logo">
   <h1>Matrix Search</h1>
   <p>Search your own Matrix message history. Sign in with your company account to get started.</p>
   <a class="btn" href="/auth/login">Sign in</a>
@@ -226,7 +228,22 @@ function renderSnippet(snippet) {
   return escaped.replace(/\[\[/g, '<mark>').replace(/\]\]/g, '</mark>');
 }
 
+async function loadCompanyLogo() {
+  try {
+    const r = await fetch('/api/branding');
+    const j = await r.json();
+    if (j.logo_url) {
+      const img = document.getElementById('companyLogo');
+      img.src = j.logo_url;
+      img.hidden = false;
+    }
+  } catch (e) {
+    // no logo uploaded, or branding endpoint unreachable - just skip it
+  }
+}
+
 async function init() {
+  loadCompanyLogo();  // shown on the pre-login screen too, so fire independently
   let me;
   try {
     const r = await fetch('/api/me');

@@ -40,6 +40,9 @@ DATA_DIR = os.environ.get("DATA_DIR", "/data")
 CONTROL_DB_PATH = os.path.join(DATA_DIR, "control.db")
 OAUTH_CLIENT_FILE = os.path.join(DATA_DIR, "oauth_client.json")
 USERS_DIR = os.path.join(DATA_DIR, "users")
+BRANDING_DIR = os.path.join(DATA_DIR, "branding")
+
+MAX_LOGO_SIZE_BYTES = 3 * 1024 * 1024
 
 MAX_BACKFILL_PAGES_PER_ROOM = int(os.environ.get("MAX_BACKFILL_PAGES_PER_ROOM", "500"))
 TOKEN_REFRESH_MARGIN_SECONDS = 60

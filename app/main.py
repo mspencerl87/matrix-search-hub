@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import auth, config, control_store, oidc, vault
+from app import auth, branding, config, control_store, oidc, vault
 from app.search_index import SORT_ORDERS, clear_all, get_stats, list_rooms, search
 from app.worker_manager import WorkerManager, user_dir
 
@@ -20,6 +20,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 # anything useful during a big sync/backfill - keep it to warnings and up.
 logging.getLogger("nio").setLevel(logging.WARNING)
 log = logging.getLogger("main")
+
+# Must exist before the StaticFiles mount below is registered.
+os.makedirs(config.BRANDING_DIR, exist_ok=True)
 
 app = FastAPI(title="matrix-search-hub")
 
@@ -280,6 +283,32 @@ async def api_config():
     return {"range_options_months": allowed, "default_months": default, "retention_months": config.RETENTION_MONTHS}
 
 
+@app.get("/api/branding")
+async def api_branding():
+    # Public and unauthenticated on purpose - this is what renders on the
+    # pre-login sign-in screen, before anyone has a session at all.
+    filename = branding.current_logo_filename()
+    return {"logo_url": f"/branding/{filename}" if filename else None}
+
+
+@app.post("/api/admin/logo")
+async def api_admin_upload_logo(request: Request, file: UploadFile = File(...)):
+    auth.require_admin(request, app_state["control_conn"])
+    data = await file.read()
+    try:
+        branding.validate_and_save(file.filename, file.content_type, data)
+    except branding.InvalidLogo as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    return {"status": "uploaded"}
+
+
+@app.post("/api/admin/logo/remove")
+async def api_admin_remove_logo(request: Request):
+    auth.require_admin(request, app_state["control_conn"])
+    branding.remove_logo()
+    return {"status": "removed"}
+
+
 @app.get("/api/metrics")
 async def api_metrics(request: Request):
     # Any signed-in user, not just admins - deliberately aggregate-only
@@ -506,4 +535,5 @@ async def api_admin_deprovision(request: Request, user_id: str):
     return {"status": "deprovisioned"}
 
 
+app.mount("/branding", StaticFiles(directory=config.BRANDING_DIR), name="branding")
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

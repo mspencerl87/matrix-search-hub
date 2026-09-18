@@ -373,6 +373,23 @@ A user doesn't need to have signed in yet to be added as an admin - they
 just won't appear in the Users table (or be able to use the Admin link)
 until they actually do.
 
+### Company logo
+
+The Branding panel lets an admin upload a logo shown on the **sign-in
+page**, before anyone has a session - PNG, JPG, WEBP, or SVG, up to 3MB.
+There's no required canvas size like 800x600 - a wordmark, a square icon,
+whatever your logo actually is will all be scaled down to fit a small
+header area (`max-height: 80px`) while keeping its own aspect ratio, so
+don't worry about matching a specific pixel size, just keep the file
+itself a reasonable size for fast loading.
+
+The file is validated before being saved - real image data is confirmed
+via Pillow (raster formats) or a basic sanity check plus a `<script>`
+tag rejection (SVG) - and stored at `data/branding/logo.<ext>`, served
+publicly and unauthenticated at `/branding/logo.<ext>` (it has to be, to
+render on the pre-login screen). Uploading a new one replaces whatever
+was there before; **Remove logo** clears it back to no logo.
+
 ## Data & security notes
 
 - `data/users/<user>/vault.db` holds that user's decrypted messages and
@@ -385,6 +402,9 @@ until they actually do.
   search-count totals. No tokens or message data.
 - `data/oauth_client.json` holds this app's own OAuth client secret if one
   was issued. Don't commit it or expose it.
+- `data/branding/` holds the uploaded logo file, if any - intentionally
+  public (served unauthenticated at `/branding/...`) since it has to
+  render on the pre-login screen. Nothing sensitive belongs in it.
 - Logging out only clears the browser session cookie - if the vault is
   still unlocked in server memory, the background sync worker keeps
   running so the index stays current. Use **Lock** (or a restart) to
@@ -421,6 +441,11 @@ until they actually do.
 - `POST /api/import-keys` — multipart `file` + `passphrase`, imports a
   Matrix room-key export and triggers the same background re-scan as
   `/api/resync`.
+- `GET /api/branding` — public, unauthenticated; `{logo_url}` (or `null`)
+  for the sign-in page.
+- `POST /api/admin/logo` — admin-only, multipart `file`; validates and
+  saves a new logo, replacing any existing one.
+- `POST /api/admin/logo/remove` — admin-only, clears the logo.
 - `GET /api/admin/overview`, `GET /api/admin/users` — admin-only, metadata
   as described above (the latter includes each user's sync health).
 - `GET /api/admin/admins` — admin-only, `{env_admins, dynamic_admins}`.

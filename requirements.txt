@@ -5,3 +5,4 @@ aiohttp==3.10.10
 itsdangerous==2.2.0
 python-multipart==0.0.9
 sqlcipher3-wheels==0.5.5.post0
+Pillow==11.0.0
