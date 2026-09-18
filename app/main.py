@@ -25,6 +25,8 @@ app = FastAPI(title="matrix-search-hub")
 
 app_state: dict = {}
 
+METRIC_SEARCHES = "searches"
+
 
 class PassphraseBody(BaseModel):
     passphrase: str
@@ -276,6 +278,29 @@ async def api_config():
     return {"range_options_months": allowed, "default_months": default, "retention_months": config.RETENTION_MONTHS}
 
 
+@app.get("/api/metrics")
+async def api_metrics(request: Request):
+    # Any signed-in user, not just admins - deliberately aggregate-only
+    # (counts, never who specifically). Named per-user status stays in the
+    # admin panel.
+    auth.require_user(request)
+    control_conn = app_state["control_conn"]
+    manager: WorkerManager = app_state["manager"]
+
+    users_total = control_store.total_user_count(control_conn)
+    users_unlocked = sum(1 for u in control_store.all_users(control_conn) if manager.is_unlocked(u["user_id"]))
+    indexed = control_store.total_indexed_stats(control_conn)
+
+    return {
+        "searches_today": control_store.metric_today(control_conn, METRIC_SEARCHES),
+        "searches_all_time": control_store.metric_all_time(control_conn, METRIC_SEARCHES),
+        "messages_indexed": indexed["messages"],
+        "rooms_indexed": indexed["rooms"],
+        "users_unlocked": users_unlocked,
+        "users_total": users_total,
+    }
+
+
 def _require_unlocked(request: Request):
     user_id = auth.require_user(request)
     manager: WorkerManager = app_state["manager"]
@@ -306,6 +331,7 @@ async def api_search(
 ):
     user_id, manager = _require_unlocked(request)
     conn = manager.vault_conns[user_id]
+    control_store.increment_metric(app_state["control_conn"], METRIC_SEARCHES)
 
     allowed = [m for m in config.SEARCH_RANGE_OPTIONS_MONTHS if m <= config.RETENTION_MONTHS] or [config.RETENTION_MONTHS]
     if months not in allowed:
@@ -326,7 +352,13 @@ async def api_search(
 async def api_status(request: Request):
     user_id, manager = _require_unlocked(request)
     conn = manager.vault_conns[user_id]
-    return get_stats(conn)
+    stats = get_stats(conn)
+    # Opportunistic write-through so org-wide totals stay computable even
+    # for users who are currently locked - no vault access needed to read it.
+    control_store.update_user_stats_cache(
+        app_state["control_conn"], user_id, stats["indexed_messages"], stats["rooms"]
+    )
+    return stats
 
 
 @app.post("/api/resync")

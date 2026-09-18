@@ -137,6 +137,40 @@ This also has a privacy benefit worth noting given the encryption model
 above: less decrypted history ever sitting on disk at all, encrypted or
 not, is less exposure if anything ever does go wrong.
 
+## Usage metrics
+
+A small stats strip on the search page, visible to every signed-in user
+(not just admins):
+
+- Searches performed today and all-time.
+- Messages/rooms indexed org-wide (summed across everyone's cached
+  counts - see below).
+- How many users currently have their vault unlocked, out of the total
+  who've ever signed in.
+
+This is deliberately **counts only, never names** - the whole point of
+keeping it on the shared page rather than admin-only is that it's meant
+to be a fun/transparency number everyone sees, and showing who
+specifically is or isn't using the tool would be a real privacy/social-
+pressure problem for a page like that. Named per-user status already
+lives in the admin panel, which is where it stays.
+
+Implementation notes, since the design choices here matter for accuracy:
+
+- Search counts live in a tiny `daily_metrics` table in `control.db` (one
+  row per day, incremented in place) rather than one row per search, so
+  it stays a few hundred rows forever regardless of search volume -
+  "all-time" is just a `SUM()` over it.
+- The org-wide message/room totals are a **sum of last-known per-user
+  counts**, cached into `control.db` opportunistically whenever a user's
+  own `/api/status` is polled. This means the total reflects each user's
+  count as of whenever they were last active, not a live read of every
+  vault - which is what makes it computable at all without touching
+  anyone's encrypted data. It also means the "rooms" figure is a sum of
+  each user's own room memberships, not a deduplicated org-wide room
+  count - a room with 20 members indexing it counts 20 times. Treat both
+  numbers as a usage/volume indicator, not a precise inventory.
+
 ## Setup
 
 1. Copy the env file:
@@ -346,8 +380,9 @@ until they actually do.
   This is the only place either lives.
 - `data/control.db` is intentionally minimal and unencrypted: which user
   IDs have used the app and their device ID (so the UI can show "unlock"
-  vs "set up"), plus the GUI-managed admin list. No tokens or message
-  data.
+  vs "set up"), the GUI-managed admin list, each user's last-known
+  message/room *counts* (not content - see Usage metrics), and daily
+  search-count totals. No tokens or message data.
 - `data/oauth_client.json` holds this app's own OAuth client secret if one
   was issued. Don't commit it or expose it.
 - Logging out only clears the browser session cookie - if the vault is
@@ -370,6 +405,9 @@ until they actually do.
   new_passphrase}`, rekeys the vault in place; 401 if the current
   passphrase is wrong.
 - `GET /api/config` — search range options and retention, for the UI.
+- `GET /api/metrics` — any signed-in user; org-wide aggregate counts
+  (searches today/all-time, indexed messages/rooms, users unlocked/total)
+  for the shared stats strip. Never per-user detail.
 - `GET /api/rooms` — distinct `{room_id, room_name}` pairs the logged-in
   user has indexed messages from, for the search UI's room filter.
 - `GET /api/search?q=...&limit=50&months=1&sort=relevance&room_id=...` —

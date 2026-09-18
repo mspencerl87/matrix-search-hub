@@ -60,6 +60,18 @@
   }
   .status { color: var(--muted); font-size: 0.8rem; margin-top: 8px; }
   .resync-msg { margin-left: 8px; }
+  .org-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    color: var(--muted);
+    font-size: 0.78rem;
+    margin-top: 10px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .org-metrics strong { color: var(--text); font-weight: 600; }
   main { max-width: 760px; margin: 0 auto; padding: 0 16px 40px; }
   .result {
     background: var(--panel);
@@ -148,6 +160,8 @@
     <button class="link" id="resyncBtn">Resync now</button>
     <span id="resyncMsg" class="resync-msg"></span>
   </div>
+
+  <div id="orgMetrics" class="org-metrics"></div>
 
   <details class="keys">
     <summary>Encrypted rooms not showing up? Import your Element key export</summary>
@@ -246,7 +260,26 @@ async function enterApp() {
   await loadRangeOptions();
   await loadRooms();
   loadStatus();
+  loadOrgMetrics();
   setInterval(loadStatus, 15000);
+  setInterval(loadOrgMetrics, 15000);
+}
+
+async function loadOrgMetrics() {
+  const el = document.getElementById('orgMetrics');
+  try {
+    const r = await fetch('/api/metrics');
+    if (!r.ok) { el.hidden = true; return; }
+    const j = await r.json();
+    el.hidden = false;
+    el.innerHTML = `
+      <span><strong>${j.searches_today}</strong> searches today (<strong>${j.searches_all_time}</strong> all-time)</span>
+      <span><strong>${j.messages_indexed}</strong> messages indexed across <strong>${j.rooms_indexed}</strong> rooms org-wide</span>
+      <span><strong>${j.users_unlocked}</strong>/<strong>${j.users_total}</strong> users unlocked right now</span>
+    `;
+  } catch (e) {
+    el.hidden = true;
+  }
 }
 
 async function loadRangeOptions() {
