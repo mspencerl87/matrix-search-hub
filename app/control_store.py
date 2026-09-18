@@ -12,6 +12,12 @@ CREATE TABLE IF NOT EXISTS users (
     device_id TEXT NOT NULL,
     created_at REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS admins (
+    user_id TEXT PRIMARY KEY,
+    added_by TEXT,
+    created_at REAL NOT NULL
+);
 """
 
 
@@ -47,3 +53,27 @@ def all_users(conn):
 def delete_user(conn, user_id: str):
     conn.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
     conn.commit()
+
+
+def add_admin(conn, user_id: str, added_by: str):
+    conn.execute(
+        "INSERT INTO admins (user_id, added_by, created_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(user_id) DO NOTHING",
+        (user_id, added_by, time.time()),
+    )
+    conn.commit()
+
+
+def remove_admin(conn, user_id: str):
+    conn.execute("DELETE FROM admins WHERE user_id = ?", (user_id,))
+    conn.commit()
+
+
+def is_dynamic_admin(conn, user_id: str) -> bool:
+    cur = conn.execute("SELECT 1 FROM admins WHERE user_id = ?", (user_id,))
+    return cur.fetchone() is not None
+
+
+def list_admins(conn):
+    cur = conn.execute("SELECT user_id, added_by, created_at FROM admins ORDER BY created_at")
+    return [{"user_id": r[0], "added_by": r[1], "created_at": r[2]} for r in cur.fetchall()]

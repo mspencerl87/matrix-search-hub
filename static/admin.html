@@ -58,6 +58,28 @@
     </div>
 
     <div class="panel">
+      <h2>Admins</h2>
+      <table>
+        <thead>
+          <tr><th>User</th><th>Source</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="adminsBody"></tbody>
+      </table>
+      <form id="addAdminForm" style="display:flex; gap:8px; margin-top:12px; max-width:420px;">
+        <input type="text" id="newAdminId" placeholder="@name:example.com" required
+               style="flex:1; padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:transparent; color:var(--text); font-size:0.85rem;">
+        <button type="submit">Add admin</button>
+      </form>
+      <div id="addAdminMsg" style="font-size:0.78rem; margin-top:6px;"></div>
+      <p style="color:var(--muted); font-size:0.78rem; margin-top:12px;">
+        Admins added here can be removed here too. Admins set via
+        <code>ADMIN_USER_IDS</code> are permanent from the GUI's perspective -
+        that's intentional, so a GUI mistake can never lock everyone out;
+        change those by editing <code>.env</code> and restarting.
+      </p>
+    </div>
+
+    <div class="panel">
       <h2>Users</h2>
       <table>
         <thead>
@@ -92,11 +114,62 @@ async function init() {
     const j = await r.json();
     renderOverview(j);
     document.getElementById('content').hidden = false;
+    await loadAdmins();
     await loadUsers();
   } catch (e) {
     document.getElementById('denied').hidden = false;
   }
 }
+
+async function loadAdmins() {
+  const r = await fetch('/api/admin/admins');
+  const j = await r.json();
+  const body = document.getElementById('adminsBody');
+  const envRows = j.env_admins.map(id => `<tr>
+    <td>${escapeHtml(id)}</td>
+    <td><span class="pill none">env (permanent)</span></td>
+    <td>-</td>
+  </tr>`);
+  const dynamicRows = j.dynamic_admins.map(a => `<tr>
+    <td>${escapeHtml(a.user_id)}</td>
+    <td><span class="pill on">added via GUI</span></td>
+    <td><button class="danger" data-remove-admin="${escapeHtml(a.user_id)}">Remove</button></td>
+  </tr>`);
+  body.innerHTML = envRows.join('') + dynamicRows.join('');
+
+  body.querySelectorAll('button[data-remove-admin]').forEach(btn => {
+    btn.addEventListener('click', () => removeAdmin(btn.getAttribute('data-remove-admin')));
+  });
+}
+
+async function removeAdmin(userId) {
+  if (!confirm(`Remove admin access for ${userId}?`)) return;
+  const r = await fetch(`/api/admin/admins/${encodeURIComponent(userId)}/remove`, { method: 'POST' });
+  const j = await r.json();
+  if (!r.ok) alert(j.error || 'Remove failed.');
+  await loadAdmins();
+}
+
+document.getElementById('addAdminForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = document.getElementById('newAdminId');
+  const msgEl = document.getElementById('addAdminMsg');
+  const userId = input.value.trim();
+  msgEl.textContent = '';
+  try {
+    const r = await fetch('/api/admin/admins', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId }),
+    });
+    const j = await r.json();
+    if (!r.ok) { msgEl.textContent = j.error || 'Add failed.'; return; }
+    input.value = '';
+    await loadAdmins();
+  } catch (e) {
+    msgEl.textContent = 'Add failed.';
+  }
+});
 
 function renderOverview(j) {
   const el = document.getElementById('overview');

@@ -320,14 +320,34 @@ accounts," not "can read anyone's data." This is also why there's no
 knowing the current one, so the only two real options for a locked-out
 user are (a) they remember it, or (b) Deprovision and start fresh.
 
+### Adding/removing admins
+
+There are two tiers, on purpose:
+
+- **`ADMIN_USER_IDS`** (env var, comma-separated) - a permanent floor.
+  Only changeable by editing `.env` and restarting. This exists so a
+  mistake made *in the GUI* can never lock everyone out of the admin
+  panel - there's always at least this list to fall back on.
+- **GUI-managed admins** - the Admins panel lets any current admin add or
+  remove additional admins by Matrix user ID, no restart needed, no
+  server access needed. This is purely additive on top of the env list,
+  never a replacement for it - the two are shown separately in the panel,
+  and an env-listed admin can't be removed from the GUI (you'll get an
+  error telling you to edit `.env` instead).
+
+A user doesn't need to have signed in yet to be added as an admin - they
+just won't appear in the Users table (or be able to use the Admin link)
+until they actually do.
+
 ## Data & security notes
 
 - `data/users/<user>/vault.db` holds that user's decrypted messages and
   Matrix OAuth tokens, encrypted at rest with their passphrase (SQLCipher).
   This is the only place either lives.
-- `data/control.db` is intentionally minimal and unencrypted: just which
-  user IDs have used the app and their device ID, so the UI can show
-  "unlock" vs "set up". No tokens or message data.
+- `data/control.db` is intentionally minimal and unencrypted: which user
+  IDs have used the app and their device ID (so the UI can show "unlock"
+  vs "set up"), plus the GUI-managed admin list. No tokens or message
+  data.
 - `data/oauth_client.json` holds this app's own OAuth client secret if one
   was issued. Don't commit it or expose it.
 - Logging out only clears the browser session cookie - if the vault is
@@ -365,6 +385,11 @@ user are (a) they remember it, or (b) Deprovision and start fresh.
   `/api/resync`.
 - `GET /api/admin/overview`, `GET /api/admin/users` — admin-only, metadata
   as described above (the latter includes each user's sync health).
+- `GET /api/admin/admins` — admin-only, `{env_admins, dynamic_admins}`.
+- `POST /api/admin/admins` — admin-only, `{user_id}`, adds a GUI-managed
+  admin.
+- `POST /api/admin/admins/{user_id}/remove` — admin-only; 409 if
+  `user_id` is set via `ADMIN_USER_IDS` rather than the GUI.
 - `POST /api/admin/users/{user_id}/lock`,
   `POST /api/admin/users/{user_id}/clear-index` (409 if that user is
   locked), `POST /api/admin/users/{user_id}/deprovision` — admin-only.

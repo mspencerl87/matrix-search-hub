@@ -4,7 +4,7 @@ import time
 from fastapi import HTTPException, Request
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
-from app import config
+from app import config, control_store
 
 SESSION_COOKIE = "matrix_search_session"
 SESSION_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
@@ -40,13 +40,20 @@ def require_user(request: Request) -> str:
     return user_id
 
 
-def is_admin(user_id: str) -> bool:
-    return user_id in config.ADMIN_USER_IDS
+def is_admin(user_id: str, control_conn=None) -> bool:
+    # ADMIN_USER_IDS (env var) is a permanent floor that can't be changed via
+    # the GUI - it's what keeps a GUI mistake from ever locking everyone out.
+    # control_conn's "admins" table is the GUI-managed, purely additive list.
+    if user_id in config.ADMIN_USER_IDS:
+        return True
+    if control_conn is not None:
+        return control_store.is_dynamic_admin(control_conn, user_id)
+    return False
 
 
-def require_admin(request: Request) -> str:
+def require_admin(request: Request, control_conn=None) -> str:
     user_id = require_user(request)
-    if not is_admin(user_id):
+    if not is_admin(user_id, control_conn):
         raise HTTPException(status_code=403, detail="Admin access required")
     return user_id
 

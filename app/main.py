@@ -35,6 +35,10 @@ class ChangePassphraseBody(BaseModel):
     new_passphrase: str
 
 
+class AdminUserBody(BaseModel):
+    user_id: str
+
+
 @app.on_event("startup")
 async def startup():
     os.makedirs(config.DATA_DIR, exist_ok=True)
@@ -163,7 +167,7 @@ async def api_me(request: Request):
     user_id = auth.read_session_user_id(request)
     if not user_id:
         return JSONResponse({"logged_in": False}, status_code=401)
-    return {"logged_in": True, "user_id": user_id, "is_admin": auth.is_admin(user_id)}
+    return {"logged_in": True, "user_id": user_id, "is_admin": auth.is_admin(user_id, app_state.get("control_conn"))}
 
 
 @app.get("/api/vault-status")
@@ -355,7 +359,7 @@ async def api_import_keys(request: Request, file: UploadFile = File(...), passph
 
 @app.get("/api/admin/overview")
 async def api_admin_overview(request: Request):
-    auth.require_admin(request)
+    auth.require_admin(request, app_state["control_conn"])
     return {
         "homeserver": config.HOMESERVER,
         "base_url": config.BASE_URL,
@@ -367,9 +371,42 @@ async def api_admin_overview(request: Request):
     }
 
 
+@app.get("/api/admin/admins")
+async def api_admin_list_admins(request: Request):
+    auth.require_admin(request, app_state["control_conn"])
+    return {
+        "env_admins": sorted(config.ADMIN_USER_IDS),
+        "dynamic_admins": control_store.list_admins(app_state["control_conn"]),
+    }
+
+
+@app.post("/api/admin/admins")
+async def api_admin_add_admin(request: Request, body: AdminUserBody):
+    actor = auth.require_admin(request, app_state["control_conn"])
+    target = body.user_id.strip()
+    if not target.startswith("@") or ":" not in target:
+        return JSONResponse(
+            {"error": "that doesn't look like a Matrix user ID, e.g. @name:example.com"}, status_code=400
+        )
+    control_store.add_admin(app_state["control_conn"], target, actor)
+    return {"status": "added"}
+
+
+@app.post("/api/admin/admins/{target_id}/remove")
+async def api_admin_remove_admin(request: Request, target_id: str):
+    auth.require_admin(request, app_state["control_conn"])
+    if target_id in config.ADMIN_USER_IDS:
+        return JSONResponse(
+            {"error": "this admin is set via ADMIN_USER_IDS (env var), not the GUI - edit .env and restart to change it"},
+            status_code=409,
+        )
+    control_store.remove_admin(app_state["control_conn"], target_id)
+    return {"status": "removed"}
+
+
 @app.get("/api/admin/users")
 async def api_admin_users(request: Request):
-    auth.require_admin(request)
+    auth.require_admin(request, app_state["control_conn"])
     manager: WorkerManager = app_state["manager"]
     rows = []
     for u in control_store.all_users(app_state["control_conn"]):
@@ -400,7 +437,7 @@ def _known_admin_target(user_id: str) -> None:
 
 @app.post("/api/admin/users/{user_id}/lock")
 async def api_admin_lock_user(request: Request, user_id: str):
-    auth.require_admin(request)
+    auth.require_admin(request, app_state["control_conn"])
     _known_admin_target(user_id)
     manager: WorkerManager = app_state["manager"]
     await manager.lock_user(user_id)
@@ -409,7 +446,7 @@ async def api_admin_lock_user(request: Request, user_id: str):
 
 @app.post("/api/admin/users/{user_id}/clear-index")
 async def api_admin_clear_index(request: Request, user_id: str):
-    auth.require_admin(request)
+    auth.require_admin(request, app_state["control_conn"])
     _known_admin_target(user_id)
     manager: WorkerManager = app_state["manager"]
     if not manager.is_unlocked(user_id):
@@ -425,7 +462,7 @@ async def api_admin_clear_index(request: Request, user_id: str):
 
 @app.post("/api/admin/users/{user_id}/deprovision")
 async def api_admin_deprovision(request: Request, user_id: str):
-    auth.require_admin(request)
+    auth.require_admin(request, app_state["control_conn"])
     _known_admin_target(user_id)
     manager: WorkerManager = app_state["manager"]
     await manager.deprovision(user_id)
