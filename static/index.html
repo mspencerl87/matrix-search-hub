@@ -86,6 +86,17 @@
   .result-links { margin-top: 8px; display: flex; gap: 14px; }
   .result-links a { color: var(--accent); font-size: 0.8rem; text-decoration: none; }
   .result-links a:hover { text-decoration: underline; }
+  .app-footer {
+    max-width: 760px;
+    margin: 40px auto 0;
+    padding: 16px;
+    border-top: 1px solid var(--border);
+    text-align: center;
+    color: var(--muted);
+    font-size: 0.75rem;
+  }
+  .app-footer a { color: var(--accent); text-decoration: none; }
+  .app-footer a:hover { text-decoration: underline; }
   .empty { color: var(--muted); padding: 40px 0; text-align: center; }
   .center-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 70vh; gap: 14px; text-align: center; padding: 20px; }
   .center-screen p { color: var(--muted); max-width: 440px; margin: 0; }
@@ -194,6 +205,13 @@
 <main>
   <div id="results" class="empty">Type something and hit search.</div>
 </main>
+<footer class="app-footer">
+  Built by Spencer LeBlanc &middot;
+  <a href="mailto:mspencerl87@gmail.com">mspencerl87@gmail.com</a> &middot;
+  <a href="https://blog.filegarden.net" target="_blank" rel="noopener">blog.filegarden.net</a> &middot;
+  <a href="https://github.com/mspencerl87" target="_blank" rel="noopener">GitHub</a> &middot;
+  <a href="https://www.linkedin.com/in/spencer-leblanc-58a57a34/" target="_blank" rel="noopener">LinkedIn</a>
+</footer>
 </div>
 
 <script>
