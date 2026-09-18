@@ -10,7 +10,6 @@ import aiohttp
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from nio import ThumbnailResponse
 from pydantic import BaseModel
 
 from app import auth, branding, config, control_store, oidc, vault
@@ -373,19 +372,39 @@ AVATAR_SIZE = 48
 @app.get("/api/avatar")
 async def api_avatar(request: Request, mxc: str):
     """Proxies a Matrix avatar thumbnail through this user's own session -
-    avatars live on the homeserver's media repo, not this app, and modern
-    homeservers require an authenticated request to fetch them."""
+    avatars live on the homeserver's media repo, not this app.
+
+    Built by hand rather than via nio's client.thumbnail(): that method
+    only ever targets the legacy unauthenticated media API
+    (/_matrix/media/r0/thumbnail/...), which nio 0.24 predates support for
+    replacing. Synapse 1.108+ requires the authenticated endpoint from
+    MSC3916 and 404s the legacy one, so this tries that first and falls
+    back to the legacy path for homeservers that never migrated."""
     user_id, manager = _require_unlocked(request)
     parsed = urlparse(mxc)
     if parsed.scheme != "mxc" or not parsed.netloc or not parsed.path.strip("/"):
         raise HTTPException(status_code=400, detail="invalid mxc URI")
 
-    indexer = manager.indexers[user_id]
-    resp = await indexer.client.thumbnail(parsed.netloc, parsed.path.strip("/"), AVATAR_SIZE, AVATAR_SIZE)
-    if not isinstance(resp, ThumbnailResponse):
-        raise HTTPException(status_code=404, detail="avatar not available")
+    server_name = parsed.netloc
+    media_id = parsed.path.strip("/")
+    access_token = manager.indexers[user_id].client.access_token
+    session = app_state["http_session"]
+    params = {"width": AVATAR_SIZE, "height": AVATAR_SIZE, "method": "scale", "allow_remote": "true"}
 
-    return Response(content=resp.body, media_type=resp.content_type, headers={"Cache-Control": "private, max-age=3600"})
+    candidates = [
+        (f"{config.HOMESERVER}/_matrix/client/v1/media/thumbnail/{server_name}/{media_id}", True),
+        (f"{config.HOMESERVER}/_matrix/media/v3/thumbnail/{server_name}/{media_id}", False),
+    ]
+    for url, needs_auth in candidates:
+        headers = {"Authorization": f"Bearer {access_token}"} if needs_auth else {}
+        async with session.get(url, params=params, headers=headers) as resp:
+            if resp.status == 200:
+                body = await resp.read()
+                return Response(
+                    content=body, media_type=resp.content_type, headers={"Cache-Control": "private, max-age=3600"}
+                )
+
+    raise HTTPException(status_code=404, detail="avatar not available")
 
 
 @app.get("/api/search")
