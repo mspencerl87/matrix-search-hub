@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app import auth, branding, config, control_store, oidc, vault
-from app.search_index import SORT_ORDERS, clear_all, get_stats, list_rooms, recent_conversations, search
+from app.search_index import SORT_ORDERS, clear_all, get_stats, last_message_by_room, list_rooms, recent_conversations, search
 from app.worker_manager import WorkerManager, user_dir
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -364,6 +364,46 @@ async def api_recent_conversations(request: Request, limit: int = 10):
             avatar_mxc = row.pop("avatar_mxc", None)
             row["avatar_url"] = f"/api/avatar?mxc={quote(avatar_mxc, safe='')}" if avatar_mxc else None
     return result
+
+
+@app.get("/api/unread")
+async def api_unread(request: Request):
+    """Every room with an unread count right now, per Matrix's own
+    notification_count/highlight_count (the same numbers Element's room-list
+    badges use) - these come from the server's own read-receipt tracking,
+    not a guess this app makes, and only reflect this user's own client
+    state while their vault is unlocked and syncing."""
+    user_id, manager = _require_unlocked(request)
+    conn = manager.vault_conns[user_id]
+    indexer = manager.indexers[user_id]
+    previews = last_message_by_room(conn)
+
+    items = []
+    for room_id, room in indexer.client.rooms.items():
+        notification_count = room.unread_notifications or 0
+        highlight_count = room.unread_highlights or 0
+        if notification_count <= 0 and highlight_count <= 0:
+            continue
+        preview = previews.get(room_id, {})
+        avatar_mxc = preview.get("avatar_mxc")
+        items.append(
+            {
+                "room_id": room_id,
+                "room_name": preview.get("room_name") or room.display_name or room_id,
+                "sender": preview.get("sender"),
+                "body": preview.get("body"),
+                "origin_server_ts": preview.get("origin_server_ts"),
+                "is_direct": preview.get("is_direct", False),
+                "notification_count": notification_count,
+                "highlight_count": highlight_count,
+                "avatar_url": f"/api/avatar?mxc={quote(avatar_mxc, safe='')}" if avatar_mxc else None,
+                "matrix_to_url": f"https://matrix.to/#/{room_id}",
+                "element_url": f"{config.ELEMENT_URL}/#/room/{room_id}",
+            }
+        )
+
+    items.sort(key=lambda i: (i["highlight_count"] <= 0, -(i["origin_server_ts"] or 0)))
+    return {"unread": items}
 
 
 AVATAR_SIZE = 48

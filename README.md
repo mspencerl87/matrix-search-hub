@@ -201,6 +201,27 @@ plain initial.
 Both sidebars hide below ~1100px viewport width to keep the search column
 usable on narrower screens/tablets.
 
+## Unread messages
+
+A separate page (`/unread.html`, linked next to **Admin** in the header,
+with a live badge showing how many conversations have something unread)
+lists every room with unread activity - meant for a quick "what actually
+needs my attention" scan without clicking through Element's room list one
+conversation at a time.
+
+The counts are Matrix's own `notification_count`/`highlight_count` per
+room - the exact same numbers behind Element's unread badges - read
+directly off this user's live sync connection (nio's
+`MatrixRoom.unread_notifications`/`unread_highlights`, populated by the
+homeserver's own read-receipt tracking). This app never computes or guesses
+"unread" itself, and it never sends read receipts on your behalf - reading
+a message in Element (or anywhere else) is what clears it here too, on
+the next sync. Rooms with an unread mention/highlight sort to the top.
+
+Like the rest of the app, this only reflects the state of your own
+unlocked, currently-syncing session - a locked vault shows nothing here
+either, for the same reason `/api/status` and search don't work locked.
+
 ## Setup
 
 1. Copy the env file:
@@ -480,6 +501,10 @@ was there before; **Remove logo** clears it back to no logo.
 - `GET /api/avatar?mxc=mxc://...` — proxies a Matrix avatar thumbnail
   through the logged-in user's own session; 400 for a malformed `mxc`
   value, 404 if the homeserver has no thumbnail for it, 423 if locked.
+- `GET /api/unread` — every room with unread activity for the logged-in
+  user right now, per Matrix's own `notification_count`/`highlight_count`
+  (same signal as Element's unread badges), each with a last-message
+  preview and links into Element/matrix.to; 423 if locked.
 - `POST /api/resync` — re-runs a full sync + backfill in the background
   for the logged-in user, without needing a key import. Useful if you
   suspect indexing stalled or missed something.

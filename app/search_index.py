@@ -89,11 +89,12 @@ def upsert_room(conn, room_id: str, room_name: str, is_direct: bool, avatar_mxc:
         conn.commit()
 
 
-def recent_conversations(conn, limit: int = 10):
-    """Most recently active room per category, each with a preview of its
-    last message. is_direct comes from the rooms table (set via
-    list_direct_rooms()); a room we haven't classified yet defaults to
-    "not a DM" rather than risking miscategorizing a real conversation."""
+def _last_message_rows(conn):
+    """One row per room_id: its most recent message plus room metadata.
+    is_direct/avatar_mxc come from the rooms table (set via
+    list_direct_rooms()/gen_avatar_url); a room we haven't classified yet
+    defaults to "not a DM" rather than risking miscategorizing a real
+    conversation."""
     cur = conn.execute(
         """
         WITH ranked AS (
@@ -109,8 +110,14 @@ def recent_conversations(conn, limit: int = 10):
         ORDER BY origin_server_ts DESC
         """
     )
+    return cur.fetchall()
+
+
+def recent_conversations(conn, limit: int = 10):
+    """Most recently active room per category, each with a preview of its
+    last message."""
     direct, rooms = [], []
-    for room_id, room_name, sender, body, ts, is_direct, avatar_mxc in cur.fetchall():
+    for room_id, room_name, sender, body, ts, is_direct, avatar_mxc in _last_message_rows(conn):
         item = {
             "room_id": room_id,
             "room_name": room_name or room_id,
@@ -125,3 +132,20 @@ def recent_conversations(conn, limit: int = 10):
         if len(direct) >= limit and len(rooms) >= limit:
             break
     return {"direct": direct, "rooms": rooms}
+
+
+def last_message_by_room(conn):
+    """Every room's latest message, keyed by room_id - for building previews
+    of a room subset chosen by some other criterion (e.g. unread status)
+    rather than the "most recent N" that recent_conversations() bucketizes."""
+    result = {}
+    for room_id, room_name, sender, body, ts, is_direct, avatar_mxc in _last_message_rows(conn):
+        result[room_id] = {
+            "room_name": room_name or room_id,
+            "sender": sender,
+            "body": body,
+            "origin_server_ts": ts,
+            "is_direct": bool(is_direct),
+            "avatar_mxc": avatar_mxc,
+        }
+    return result

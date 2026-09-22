@@ -86,6 +86,7 @@
   h1 { font-size: 1.3rem; margin: 0; }
   .account { font-size: 0.8rem; color: var(--muted); }
   .account a, button.link { color: var(--accent); text-decoration: none; margin-left: 10px; background: none; border: none; cursor: pointer; font-size: inherit; padding: 0; }
+  #unreadBadge { display: inline-block; margin-left: 4px; padding: 1px 7px; border-radius: 999px; background: #0dbd8b33; color: var(--accent); font-size: 0.72rem; font-weight: 600; }
   .searchbar { display: flex; gap: 8px; margin-top: 14px; }
   input[type="text"], input[type="password"], input[type="file"] {
     padding: 12px 14px;
@@ -221,6 +222,7 @@
     </div>
     <div class="account">
       <span id="whoami"></span>
+      <a href="/unread.html" id="unreadLink">Unread<span id="unreadBadge" hidden></span></a>
       <a href="/admin.html" id="adminLink" hidden>Admin</a>
       <button class="link" id="lockBtn">Lock</button>
       <a href="/auth/logout">Log out</a>
@@ -373,9 +375,28 @@ async function enterApp() {
   loadStatus();
   loadOrgMetrics();
   loadRecentConversations();
+  loadUnreadBadge();
   setInterval(loadStatus, 15000);
   setInterval(loadOrgMetrics, 15000);
   setInterval(loadRecentConversations, 30000);
+  setInterval(loadUnreadBadge, 30000);
+}
+
+async function loadUnreadBadge() {
+  const badge = document.getElementById('unreadBadge');
+  try {
+    const r = await fetch('/api/unread');
+    if (!r.ok) { badge.hidden = true; return; }
+    const j = await r.json();
+    if (j.unread.length) {
+      badge.textContent = j.unread.length;
+      badge.hidden = false;
+    } else {
+      badge.hidden = true;
+    }
+  } catch (e) {
+    badge.hidden = true;
+  }
 }
 
 function avatarInitial(name) {
