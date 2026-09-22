@@ -248,18 +248,25 @@ how you left it between visits. A filter box narrows the tree to matching
 names, auto-expanding any space that contains a match.
 
 The hierarchy comes straight from Matrix's own space mechanism, not a
-guess:
+guess - via a direct call to the dedicated Spaces API
+(`space_get_hierarchy`, one per joined room, every full resync) rather
+than relying on the `m.room.create`/`m.space.child` state events nio
+would otherwise deliver through its usual sync-event callbacks. Those
+callbacks only fire when nio actually processes a sync response, which -
+like this app's backfill - it silently skips entirely if the
+server-returned sync token happens to match what's already stored; since
+space data is captured nowhere else, a skipped sync would otherwise mean
+no hierarchy at all until something coincidentally forced a real one. The
+direct API call sidesteps that dependency completely.
 
 - A room is a **Space** (a container of other rooms, not something you
-  chat in directly) if its `m.room.create` event declared
-  `type: "m.space"` - this app captures that from the create event since
-  nio doesn't surface it as a queryable property itself.
-- A space's children come from its own `m.space.child` state events (one
-  per child room) - the exact mechanism Element's own sidebar hierarchy is
-  built from. This is rebuilt from scratch on every full resync rather
-  than patched incrementally, since a room being *removed* from a space is
-  only ever announced as a live event, never as an absence, so a fresh
-  full sync is treated as the authoritative current snapshot.
+  chat in directly) if that call reports `room_type: "m.space"` for it.
+- A space's children come from that same call's `children_state` (mirrors
+  the room's own `m.space.child` state events) - the exact mechanism
+  Element's own sidebar hierarchy is built from. This is rebuilt from
+  scratch on every full resync rather than patched incrementally, since a
+  room being *removed* from a space has to be re-derived by re-querying
+  current state, not inferred from an absence of some other signal.
 - Each node shows an unread count (same source as the Unread page),
   rolled up through a space so a collapsed header tells you whether
   anything inside needs attention without expanding it.

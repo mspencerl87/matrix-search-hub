@@ -11,10 +11,9 @@ from nio import (
     MegolmEvent,
     MessageDirection,
     ReceiptEvent,
-    RoomCreateEvent,
     RoomMessagesError,
     RoomMessageText,
-    RoomSpaceChildEvent,
+    SpaceGetHierarchyResponse,
     SyncError,
     SyncResponse,
 )
@@ -70,8 +69,6 @@ class UserIndexer:
 
         self.client.add_event_callback(self._on_message, RoomMessageText)
         self.client.add_event_callback(self._on_undecryptable, MegolmEvent)
-        self.client.add_event_callback(self._on_room_create, RoomCreateEvent)
-        self.client.add_event_callback(self._on_space_child, RoomSpaceChildEvent)
         self.client.add_response_callback(self._on_sync, SyncResponse)
         self.client.add_ephemeral_callback(self._on_receipt, ReceiptEvent)
 
@@ -115,19 +112,6 @@ class UserIndexer:
         for receipt in event.receipts:
             if receipt.user_id == self.user_id:
                 update_read_marker(self.conn, room.room_id, receipt.timestamp)
-
-    async def _on_room_create(self, room: MatrixRoom, event: RoomCreateEvent):
-        """A room's type (whether it's a Space, i.e. a container of other
-        rooms) is fixed forever on its m.room.create event - nio doesn't
-        surface this on MatrixRoom itself, so it's captured here instead."""
-        if event.room_type == "m.space":
-            mark_space(self.conn, room.room_id)
-
-    async def _on_space_child(self, room: MatrixRoom, event: RoomSpaceChildEvent):
-        """m.space.child lives in the SPACE's own state, one event per
-        child room (event.state_key) - this is exactly the hierarchy
-        Element's own sidebar is built from."""
-        add_space_child(self.conn, room.room_id, event.state_key)
 
     async def _on_sync(self, response: SyncResponse):
         for room_id, room_info in response.rooms.join.items():
@@ -197,11 +181,6 @@ class UserIndexer:
         (e.g. after a key import) since inserts are idempotent on event_id."""
         log.info("[%s] performing full sync...", self.user_id)
         self.last_sync_attempt_at = time.time()
-        # Cleared up front rather than patched incrementally - a removed
-        # space/child relationship is only ever announced as a live event,
-        # never as an absence, so a full resync is treated as the
-        # authoritative current snapshot instead.
-        clear_space_children(self.conn)
         resp = await self.client.sync(timeout=30000, full_state=True)
         if isinstance(resp, SyncError):
             self.last_error = f"full sync failed (status={getattr(resp, 'status_code', '?')}): {resp}"
@@ -212,6 +191,7 @@ class UserIndexer:
         log.info("[%s] sync complete, %d rooms joined", self.user_id, len(self.client.rooms))
 
         await self._refresh_room_classification()
+        await self._refresh_space_hierarchy()
 
         # Iterate every currently-known joined room (from the client's local
         # state, always populated) rather than _prev_batches - that dict only
@@ -252,6 +232,42 @@ class UserIndexer:
             upsert_room(
                 self.conn, room_id, room.display_name, room_id in direct_room_ids, room.gen_avatar_url, commit=False
             )
+        self.conn.commit()
+
+    async def _refresh_space_hierarchy(self):
+        """Records which joined rooms are Spaces and what their direct
+        children are, via a direct per-room call to the dedicated Spaces
+        API (space_get_hierarchy, depth 1) rather than the m.room.create/
+        m.space.child state events nio would otherwise deliver through its
+        own sync-event callbacks. Those callbacks only fire when nio
+        actually processes a sync response body, which - like backfill -
+        it silently skips entirely if the server-returned sync token
+        happens to match what's already stored (see _backfill_room's
+        fallback for the same underlying nio behavior). Since this is the
+        very first time this app ever captures space data, there's no
+        earlier successful capture to fall back on if that skip happens to
+        hit on this particular sync - a direct REST call sidesteps the
+        question entirely instead of depending on sync-event delivery."""
+        clear_space_children(self.conn, commit=False)
+        self.conn.commit()
+
+        for room_id in list(self.client.rooms.keys()):
+            try:
+                resp = await self.client.space_get_hierarchy(room_id, max_depth=1)
+            except Exception:
+                log.exception("[%s] space_get_hierarchy failed for %s", self.user_id, room_id)
+                continue
+            if not isinstance(resp, SpaceGetHierarchyResponse) or not resp.rooms:
+                continue
+
+            self_entry = resp.rooms[0]
+            if self_entry.get("room_type") != "m.space":
+                continue
+            mark_space(self.conn, room_id, commit=False)
+            for child_event in self_entry.get("children_state", []):
+                child_id = child_event.get("state_key")
+                if child_id:
+                    add_space_child(self.conn, room_id, child_id, commit=False)
         self.conn.commit()
 
     async def _backfill_room(self, room_id: str):
