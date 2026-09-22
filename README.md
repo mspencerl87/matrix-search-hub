@@ -298,6 +298,19 @@ either, for the same reason `/api/status` and search don't work locked.
 7. Open `http://<host>:8080` (or wherever you've mapped/proxied it), sign
    in, and set a passphrase.
 
+## Tests
+
+Install the development dependencies and run pytest:
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest
+```
+
+The test run includes branch coverage and enforces the baseline configured
+in `pyproject.toml`. GitHub Actions runs the same command for every pull
+request.
+
 ## Encrypted Matrix rooms
 
 Separate from the vault passphrase above - this is about Matrix's own
