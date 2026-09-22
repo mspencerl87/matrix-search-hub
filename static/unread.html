@@ -19,7 +19,7 @@
   body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
   header {
     padding: 24px 16px 12px;
-    max-width: 760px;
+    max-width: 1100px;
     margin: 0 auto;
     display: flex;
     justify-content: space-between;
@@ -29,8 +29,20 @@
   }
   h1 { font-size: 1.3rem; margin: 0; }
   header a, button.link { color: var(--accent); text-decoration: none; font-size: 0.85rem; background: none; border: none; cursor: pointer; padding: 0; }
-  main { max-width: 760px; margin: 0 auto; padding: 0 16px 40px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 0 16px 40px; }
   .empty, .denied { color: var(--muted); padding: 60px 20px; text-align: center; }
+  .columns { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 800px) {
+    .columns { grid-template-columns: 1fr; }
+  }
+  .column h2 {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    margin: 0 0 10px;
+  }
+  .column-empty { color: var(--muted); font-size: 0.85rem; padding: 8px 2px; }
   .conversation-list { display: flex; flex-direction: column; gap: 8px; }
   .conversation-item {
     display: flex;
@@ -87,7 +99,16 @@
   <div id="denied" class="denied" hidden>Please sign in first.</div>
   <div id="locked" class="denied" hidden>Your vault is locked - <a href="/">unlock it</a> to see unread conversations.</div>
   <div id="empty" class="empty" hidden>No unread conversations - you're all caught up.</div>
-  <div id="list" class="conversation-list"></div>
+  <div id="columns" class="columns" hidden>
+    <div class="column">
+      <h2>Unread PMs</h2>
+      <div id="listDirect" class="conversation-list"></div>
+    </div>
+    <div class="column">
+      <h2>Unread Rooms</h2>
+      <div id="listRooms" class="conversation-list"></div>
+    </div>
+  </div>
 </main>
 
 <script>
@@ -100,16 +121,12 @@ function avatarInitial(name) {
   return trimmed ? trimmed.charAt(0).toUpperCase() : '?';
 }
 
-function renderList(items) {
-  const listEl = document.getElementById('list');
-  const emptyEl = document.getElementById('empty');
+function renderColumn(el, items, emptyLabel) {
   if (!items.length) {
-    listEl.innerHTML = '';
-    emptyEl.hidden = false;
+    el.innerHTML = `<div class="column-empty">${emptyLabel}</div>`;
     return;
   }
-  emptyEl.hidden = true;
-  listEl.innerHTML = items.map(item => {
+  el.innerHTML = items.map(item => {
     const date = item.origin_server_ts ? new Date(item.origin_server_ts).toLocaleString() : '';
     const preview = item.sender ? `${escapeHtml(item.sender)}: ${escapeHtml(item.body || '')}` : escapeHtml(item.body || '');
     const initial = escapeHtml(avatarInitial(item.room_name));
@@ -141,7 +158,19 @@ async function loadUnread() {
     if (r.status === 423) { document.getElementById('locked').hidden = false; return; }
     if (!r.ok) return;
     const j = await r.json();
-    renderList(j.unread);
+    const columnsEl = document.getElementById('columns');
+    const emptyEl = document.getElementById('empty');
+    if (!j.unread.length) {
+      columnsEl.hidden = true;
+      emptyEl.hidden = false;
+      return;
+    }
+    emptyEl.hidden = true;
+    columnsEl.hidden = false;
+    const direct = j.unread.filter(item => item.is_direct);
+    const rooms = j.unread.filter(item => !item.is_direct);
+    renderColumn(document.getElementById('listDirect'), direct, 'No unread PMs.');
+    renderColumn(document.getElementById('listRooms'), rooms, 'No unread rooms.');
   } catch (e) {
     // leave whatever was last rendered rather than clearing it on a blip
   }
