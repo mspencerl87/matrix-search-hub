@@ -48,11 +48,19 @@ CREATE TABLE IF NOT EXISTS oauth (
 -- guessed at from room state. avatar_mxc is an mxc:// content URI (nio's
 -- gen_avatar_url - the room's own avatar if set, otherwise the other
 -- member's for a DM), resolved to an actual image via /api/avatar.
+-- read_marker_ts is this account's own most recent read-receipt timestamp
+-- in that room (m.read or the private m.read.private variant - either
+-- means the user genuinely read up to that point, from any of their
+-- devices) - used to compute unread counts ourselves instead of trusting
+-- nio's per-device unread_notifications, which only reflects this app's
+-- own bot device (which never reads anything) and is therefore useless
+-- for this purpose.
 CREATE TABLE IF NOT EXISTS rooms (
     room_id TEXT PRIMARY KEY,
     room_name TEXT,
     is_direct INTEGER NOT NULL DEFAULT 0,
-    avatar_mxc TEXT
+    avatar_mxc TEXT,
+    read_marker_ts INTEGER
 );
 """
 
@@ -64,6 +72,9 @@ def _migrate(conn):
     cols = {row[1] for row in conn.execute("PRAGMA table_info(rooms)").fetchall()}
     if "avatar_mxc" not in cols:
         conn.execute("ALTER TABLE rooms ADD COLUMN avatar_mxc TEXT")
+        conn.commit()
+    if "read_marker_ts" not in cols:
+        conn.execute("ALTER TABLE rooms ADD COLUMN read_marker_ts INTEGER")
         conn.commit()
 
 

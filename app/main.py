@@ -13,7 +13,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app import auth, branding, config, control_store, oidc, vault
-from app.search_index import SORT_ORDERS, clear_all, get_stats, last_message_by_room, list_rooms, recent_conversations, search
+from app.search_index import (
+    SORT_ORDERS,
+    clear_all,
+    get_stats,
+    last_message_by_room,
+    list_rooms,
+    recent_conversations,
+    search,
+    unread_counts_by_room,
+)
 from app.worker_manager import WorkerManager, user_dir
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -368,34 +377,31 @@ async def api_recent_conversations(request: Request, limit: int = 10):
 
 @app.get("/api/unread")
 async def api_unread(request: Request):
-    """Every room with an unread count right now, per Matrix's own
-    notification_count/highlight_count (the same numbers Element's room-list
-    badges use) - these come from the server's own read-receipt tracking,
-    not a guess this app makes, and only reflect this user's own client
-    state while their vault is unlocked and syncing."""
+    """Every room with unread messages right now, counted from this
+    account's own read-receipt position (see update_read_marker() /
+    unread_counts_by_room() for why this app tracks that itself instead of
+    trusting nio's per-device unread_notifications - that field reflects
+    this app's own bot device, which never reads anything, not what the
+    user's actually read in Element or elsewhere)."""
     user_id, manager = _require_unlocked(request)
     conn = manager.vault_conns[user_id]
-    indexer = manager.indexers[user_id]
     previews = last_message_by_room(conn)
+    counts = unread_counts_by_room(conn, user_id)
 
     items = []
-    for room_id, room in indexer.client.rooms.items():
-        notification_count = room.unread_notifications or 0
-        highlight_count = room.unread_highlights or 0
-        if notification_count <= 0 and highlight_count <= 0:
-            continue
+    for room_id, count_info in counts.items():
         preview = previews.get(room_id, {})
         avatar_mxc = preview.get("avatar_mxc")
         items.append(
             {
                 "room_id": room_id,
-                "room_name": preview.get("room_name") or room.display_name or room_id,
+                "room_name": preview.get("room_name") or room_id,
                 "sender": preview.get("sender"),
                 "body": preview.get("body"),
                 "origin_server_ts": preview.get("origin_server_ts"),
                 "is_direct": preview.get("is_direct", False),
-                "notification_count": notification_count,
-                "highlight_count": highlight_count,
+                "notification_count": count_info["unread_count"],
+                "highlight_count": count_info["mention_count"],
                 "avatar_url": f"/api/avatar?mxc={quote(avatar_mxc, safe='')}" if avatar_mxc else None,
                 "matrix_to_url": f"https://matrix.to/#/{room_id}",
                 "element_url": f"{config.ELEMENT_URL}/#/room/{room_id}",

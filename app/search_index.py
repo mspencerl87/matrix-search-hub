@@ -1,3 +1,6 @@
+import re
+
+
 def add_message(conn, event_id, room_id, room_name, sender, body, ts, commit=True):
     if not body:
         return
@@ -87,6 +90,65 @@ def upsert_room(conn, room_id: str, room_name: str, is_direct: bool, avatar_mxc:
     )
     if commit:
         conn.commit()
+
+
+def update_read_marker(conn, room_id: str, ts: int, commit: bool = True):
+    """Records this account's own read-receipt timestamp for a room, taking
+    the max against whatever's already stored so a late/out-of-order
+    receipt can never move the marker backwards."""
+    conn.execute(
+        """
+        INSERT INTO rooms (room_id, read_marker_ts) VALUES (?, ?)
+        ON CONFLICT(room_id) DO UPDATE SET
+            read_marker_ts = MAX(COALESCE(read_marker_ts, 0), excluded.read_marker_ts)
+        """,
+        (room_id, ts),
+    )
+    if commit:
+        conn.commit()
+
+
+def unread_counts_by_room(conn, self_user_id: str):
+    """Per-room unread/mention counts, computed from this account's own
+    read-receipt position (read_marker_ts) rather than nio's built-in
+    unread_notifications/unread_highlights - those reflect this app's own
+    bot device, which never reads anything and so is always "maximally
+    unread", not what the user has actually read elsewhere (e.g. in
+    Element, which by default sends *private* read receipts that are
+    per-device and never seen by this app's device at all).
+
+    A room with no read marker recorded yet (no receipt observed since
+    this feature shipped, or since the room was first joined) is left out
+    entirely rather than reported as fully unread with no real baseline.
+
+    "Mentions" here is a plain-text heuristic (the user's own localpart or
+    a literal "@room" appearing as a whole word in the message) since
+    evaluating the account's real push rules isn't something this app has
+    access to - close to, but not exactly, what Element itself highlights.
+    Matching is done in Python with a word-boundary regex rather than SQL
+    LIKE, since a plain substring match on a short localpart (e.g. "me")
+    also fires on unrelated words that merely contain it (e.g. "mention")."""
+    localpart = self_user_id.split(":", 1)[0].lstrip("@")
+    mention_re = re.compile(r"\b(" + re.escape(localpart) + r"|@room)\b", re.IGNORECASE)
+
+    cur = conn.execute(
+        """
+        SELECT m.room_id, m.body
+        FROM messages m
+        JOIN rooms r ON r.room_id = m.room_id
+        WHERE r.read_marker_ts IS NOT NULL
+          AND m.origin_server_ts > r.read_marker_ts
+          AND m.sender != ?
+        """,
+        (self_user_id,),
+    )
+    counts: dict[str, dict[str, int]] = {}
+    for room_id, body in cur.fetchall():
+        entry = counts.setdefault(room_id, {"unread_count": 0, "mention_count": 0})
+        entry["unread_count"] += 1
+        if body and mention_re.search(body):
+            entry["mention_count"] += 1
+    return counts
 
 
 def _last_message_rows(conn):

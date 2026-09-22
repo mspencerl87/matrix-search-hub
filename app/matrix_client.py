@@ -10,6 +10,7 @@ from nio import (
     MatrixRoom,
     MegolmEvent,
     MessageDirection,
+    ReceiptEvent,
     RoomMessagesError,
     RoomMessageText,
     SyncError,
@@ -17,7 +18,7 @@ from nio import (
 )
 
 from app import control_store
-from app.search_index import add_message, get_stats, prune_older_than, upsert_room
+from app.search_index import add_message, get_stats, prune_older_than, update_read_marker, upsert_room
 
 log = logging.getLogger("matrix_client")
 
@@ -59,6 +60,7 @@ class UserIndexer:
         self.client.add_event_callback(self._on_message, RoomMessageText)
         self.client.add_event_callback(self._on_undecryptable, MegolmEvent)
         self.client.add_response_callback(self._on_sync, SyncResponse)
+        self.client.add_ephemeral_callback(self._on_receipt, ReceiptEvent)
 
     def update_access_token(self, access_token: str) -> None:
         self.client.access_token = access_token
@@ -90,6 +92,16 @@ class UserIndexer:
             self.user_id, event.event_id, room.room_id, room.display_name,
         )
         self._undecryptable += 1
+
+    async def _on_receipt(self, room: MatrixRoom, event: ReceiptEvent):
+        """Tracks this account's own read position per room, from receipts
+        of any type (public m.read or the private m.read.private variant
+        Element sends by default) and from any of the user's devices - see
+        update_read_marker() for why this, rather than nio's own
+        unread_notifications, is what /api/unread relies on."""
+        for receipt in event.receipts:
+            if receipt.user_id == self.user_id:
+                update_read_marker(self.conn, room.room_id, receipt.timestamp)
 
     async def _on_sync(self, response: SyncResponse):
         for room_id, room_info in response.rooms.join.items():
