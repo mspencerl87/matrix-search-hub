@@ -15,11 +15,13 @@ from pydantic import BaseModel
 from app import auth, branding, config, control_store, oidc, vault
 from app.search_index import (
     SORT_ORDERS,
+    build_room_tree,
     clear_all,
     get_stats,
     last_message_by_room,
     list_rooms,
     recent_conversations,
+    room_tree,
     search,
     unread_counts_by_room,
 )
@@ -410,6 +412,34 @@ async def api_unread(request: Request):
 
     items.sort(key=lambda i: (i["highlight_count"] <= 0, -(i["origin_server_ts"] or 0)))
     return {"unread": items}
+
+
+def _decorate_tree(nodes: list) -> list:
+    """Adds URL fields to each node in place - kept separate from
+    build_room_tree() so that pure tree-assembly logic stays testable
+    without a config/URL-building dependency."""
+    for node in nodes:
+        avatar_mxc = node.pop("avatar_mxc", None)
+        node["avatar_url"] = f"/api/avatar?mxc={quote(avatar_mxc, safe='')}" if avatar_mxc else None
+        node["matrix_to_url"] = f"https://matrix.to/#/{node['room_id']}"
+        node["element_url"] = f"{config.ELEMENT_URL}/#/room/{node['room_id']}"
+        _decorate_tree(node["children"])
+    return nodes
+
+
+@app.get("/api/rooms-tree")
+async def api_rooms_tree(request: Request):
+    """The Space -> room hierarchy for this account's non-DM rooms (from
+    Matrix's own m.space.child relationships - the same structure Element's
+    sidebar is built from), each node carrying its avatar and current
+    unread count so a space's collapsed header can show whether anything
+    inside it needs attention."""
+    user_id, manager = _require_unlocked(request)
+    conn = manager.vault_conns[user_id]
+    rooms, edges = room_tree(conn)
+    counts = unread_counts_by_room(conn, user_id)
+    tree = build_room_tree(rooms, edges, counts)
+    return {"tree": _decorate_tree(tree)}
 
 
 AVATAR_SIZE = 48

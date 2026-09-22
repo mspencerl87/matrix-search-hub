@@ -55,12 +55,29 @@ CREATE TABLE IF NOT EXISTS oauth (
 -- nio's per-device unread_notifications, which only reflects this app's
 -- own bot device (which never reads anything) and is therefore useless
 -- for this purpose.
+-- is_space marks a room whose m.room.create event declared room_type
+-- "m.space" - Matrix's actual container/folder concept (Element's
+-- sidebar groupings). It's permanent once set: a room's type can't
+-- change after creation, so this only ever gets set to 1, never back to 0.
 CREATE TABLE IF NOT EXISTS rooms (
     room_id TEXT PRIMARY KEY,
     room_name TEXT,
     is_direct INTEGER NOT NULL DEFAULT 0,
     avatar_mxc TEXT,
-    read_marker_ts INTEGER
+    read_marker_ts INTEGER,
+    is_space INTEGER NOT NULL DEFAULT 0
+);
+
+-- Space -> child room edges, from that space's own m.space.child state
+-- events (the same mechanism Element's sidebar hierarchy is built from).
+-- Rebuilt from scratch on every full resync (see resync_history()) rather
+-- than patched incrementally, since a live sync only announces removals
+-- as an event, not an absence, and it's simpler to treat each full sync
+-- as the authoritative current snapshot.
+CREATE TABLE IF NOT EXISTS space_children (
+    space_id TEXT NOT NULL,
+    child_room_id TEXT NOT NULL,
+    PRIMARY KEY (space_id, child_room_id)
 );
 """
 
@@ -75,6 +92,9 @@ def _migrate(conn):
         conn.commit()
     if "read_marker_ts" not in cols:
         conn.execute("ALTER TABLE rooms ADD COLUMN read_marker_ts INTEGER")
+        conn.commit()
+    if "is_space" not in cols:
+        conn.execute("ALTER TABLE rooms ADD COLUMN is_space INTEGER NOT NULL DEFAULT 0")
         conn.commit()
 
 

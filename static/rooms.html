@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Matrix Search - Rooms</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #15171b;
+    --panel: #1e2027;
+    --border: #2e3038;
+    --text: #e3e3e8;
+    --muted: #9092a0;
+    --accent: #0dbd8b;
+    --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  header {
+    padding: 24px 16px 12px;
+    max-width: 720px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  h1 { font-size: 1.3rem; margin: 0; }
+  header a, button.link { color: var(--accent); text-decoration: none; font-size: 0.85rem; background: none; border: none; cursor: pointer; padding: 0; }
+  main { max-width: 720px; margin: 0 auto; padding: 0 16px 40px; }
+  .empty, .denied { color: var(--muted); padding: 60px 20px; text-align: center; }
+  .filter-bar { margin-bottom: 14px; }
+  #filterInput {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    font-size: 0.9rem;
+  }
+  #filterInput:focus { outline: 2px solid var(--accent); }
+  .tree {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--panel);
+    overflow: hidden;
+  }
+  .tree-node { border-bottom: 1px solid var(--border); }
+  .tree-node:last-child { border-bottom: none; }
+  .tree-children .tree-node:last-child { border-bottom: 1px solid var(--border); }
+  .tree-children { border-top: 1px solid var(--border); }
+  .tree-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px 8px 0;
+    text-decoration: none;
+    color: var(--text);
+    cursor: pointer;
+    min-height: 20px;
+  }
+  .tree-row-leaf { cursor: pointer; }
+  .tree-row:hover { background: #ffffff08; }
+  .chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    flex-shrink: 0;
+    color: var(--muted);
+    font-size: 0.7rem;
+    transition: transform 0.1s ease;
+  }
+  .chevron.expanded { transform: rotate(90deg); }
+  .tree-avatar {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: var(--bg);
+  }
+  .tree-avatar-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: #04211a;
+    background: var(--accent);
+  }
+  .tree-row-space .tree-avatar, .tree-row-space .tree-avatar-fallback { border-radius: 6px; }
+  .tree-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tree-row-space .tree-name { font-weight: 600; }
+  .pill {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  .pill.count { background: #0dbd8b33; color: var(--accent); }
+  .pill.highlight { background: #ff6b6b33; color: var(--danger); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Rooms</h1>
+  <div>
+    <button class="link" id="refreshBtn">Refresh</button>
+    &middot;
+    <a href="/">&larr; Back to search</a>
+  </div>
+</header>
+
+<main>
+  <div id="denied" class="denied" hidden>Please sign in first.</div>
+  <div id="locked" class="denied" hidden>Your vault is locked - <a href="/">unlock it</a> to browse rooms.</div>
+  <div id="treeWrap" hidden>
+    <div class="filter-bar">
+      <input id="filterInput" type="text" placeholder="Filter rooms and spaces...">
+    </div>
+    <div id="tree" class="tree"></div>
+  </div>
+</main>
+
+<script>
+function escapeHtml(s) {
+  return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function avatarInitial(name) {
+  const trimmed = (name || '').trim();
+  return trimmed ? trimmed.charAt(0).toUpperCase() : '?';
+}
+
+const COLLAPSED_KEY = 'mshub_rooms_collapsed';
+
+function loadCollapsed() {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_KEY);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch (e) {
+    return new Set();
+  }
+}
+
+function saveCollapsed(set) {
+  try {
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...set]));
+  } catch (e) {
+    // private browsing / storage blocked - expand state just won't persist
+  }
+}
+
+let collapsed = loadCollapsed();
+let currentTree = [];
+let filterQuery = '';
+
+function filterTree(nodes, query) {
+  const result = [];
+  for (const node of nodes) {
+    const selfMatch = node.room_name.toLowerCase().includes(query);
+    const filteredChildren = node.children ? filterTree(node.children, query) : [];
+    if (selfMatch || filteredChildren.length) {
+      result.push(Object.assign({}, node, { children: filteredChildren, _forceExpand: filteredChildren.length > 0 }));
+    }
+  }
+  return result;
+}
+
+function renderNode(node, depth, filtering) {
+  const hasChildren = node.children && node.children.length > 0;
+  const expanded = filtering ? (node._forceExpand || !hasChildren) : !collapsed.has(node.room_id);
+  const indent = 6 + depth * 20;
+  const initial = escapeHtml(avatarInitial(node.room_name));
+  const fallback = `<span class="tree-avatar tree-avatar-fallback"${node.avatar_url ? ' style="display:none;"' : ''}>${initial}</span>`;
+  const avatar = node.avatar_url
+    ? `<img class="tree-avatar" src="${escapeHtml(node.avatar_url)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">${fallback}`
+    : fallback;
+  const badge = node.unread_count > 0
+    ? `<span class="pill ${node.mention_count > 0 ? 'highlight' : 'count'}">${node.unread_count}</span>`
+    : '';
+  const chevron = `<span class="chevron${expanded ? ' expanded' : ''}">${hasChildren ? '&#9656;' : ''}</span>`;
+  const nameHtml = `<span class="tree-name">${escapeHtml(node.room_name)}</span>`;
+
+  let row;
+  if (node.is_space) {
+    row = `<div class="tree-row tree-row-space" data-room-id="${escapeHtml(node.room_id)}" style="padding-left:${indent}px">
+      ${chevron}${avatar}${nameHtml}${badge}
+    </div>`;
+  } else {
+    row = `<a class="tree-row tree-row-leaf" href="${escapeHtml(node.element_url)}" target="_blank" rel="noopener" style="padding-left:${indent}px">
+      ${chevron}${avatar}${nameHtml}${badge}
+    </a>`;
+  }
+
+  const childrenHtml = hasChildren
+    ? `<div class="tree-children" data-parent="${escapeHtml(node.room_id)}"${expanded ? '' : ' hidden'}>${buildTreeHtml(node.children, depth + 1, filtering)}</div>`
+    : '';
+
+  return `<div class="tree-node">${row}${childrenHtml}</div>`;
+}
+
+function buildTreeHtml(nodes, depth, filtering) {
+  return nodes.map(node => renderNode(node, depth, filtering)).join('');
+}
+
+function renderAll() {
+  const treeEl = document.getElementById('tree');
+  const query = filterQuery.trim().toLowerCase();
+  const filtering = !!query;
+  const nodes = filtering ? filterTree(currentTree, query) : currentTree;
+  if (!nodes.length) {
+    treeEl.innerHTML = `<div class="empty">${filtering ? 'No rooms match.' : "No rooms found - only direct messages? Check the search page's sidebars."}</div>`;
+    return;
+  }
+  treeEl.innerHTML = buildTreeHtml(nodes, 0, filtering);
+}
+
+document.getElementById('tree').addEventListener('click', (e) => {
+  if (filterQuery.trim()) return; // expand/collapse is disabled while filtering - everything's force-expanded to show matches
+  const row = e.target.closest('.tree-row-space');
+  if (!row) return;
+  const childrenEl = row.nextElementSibling;
+  if (!childrenEl || !childrenEl.classList.contains('tree-children')) return;
+  const nowHidden = !childrenEl.hidden;
+  childrenEl.hidden = nowHidden;
+  row.querySelector('.chevron').classList.toggle('expanded', !nowHidden);
+  const roomId = row.dataset.roomId;
+  if (nowHidden) collapsed.add(roomId); else collapsed.delete(roomId);
+  saveCollapsed(collapsed);
+});
+
+document.getElementById('filterInput').addEventListener('input', (e) => {
+  filterQuery = e.target.value;
+  renderAll();
+});
+
+async function loadTree() {
+  try {
+    const r = await fetch('/api/rooms-tree');
+    if (r.status === 401) { document.getElementById('denied').hidden = false; return; }
+    if (r.status === 423) { document.getElementById('locked').hidden = false; return; }
+    if (!r.ok) return;
+    const j = await r.json();
+    currentTree = j.tree;
+    document.getElementById('treeWrap').hidden = false;
+    renderAll();
+  } catch (e) {
+    // leave whatever was last rendered rather than clearing it on a blip
+  }
+}
+
+document.getElementById('refreshBtn').addEventListener('click', loadTree);
+
+loadTree();
+setInterval(loadTree, 30000);
+</script>
+</body>
+</html>

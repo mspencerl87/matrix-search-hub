@@ -11,14 +11,25 @@ from nio import (
     MegolmEvent,
     MessageDirection,
     ReceiptEvent,
+    RoomCreateEvent,
     RoomMessagesError,
     RoomMessageText,
+    RoomSpaceChildEvent,
     SyncError,
     SyncResponse,
 )
 
 from app import control_store
-from app.search_index import add_message, get_stats, prune_older_than, update_read_marker, upsert_room
+from app.search_index import (
+    add_message,
+    add_space_child,
+    clear_space_children,
+    get_stats,
+    mark_space,
+    prune_older_than,
+    update_read_marker,
+    upsert_room,
+)
 
 log = logging.getLogger("matrix_client")
 
@@ -59,6 +70,8 @@ class UserIndexer:
 
         self.client.add_event_callback(self._on_message, RoomMessageText)
         self.client.add_event_callback(self._on_undecryptable, MegolmEvent)
+        self.client.add_event_callback(self._on_room_create, RoomCreateEvent)
+        self.client.add_event_callback(self._on_space_child, RoomSpaceChildEvent)
         self.client.add_response_callback(self._on_sync, SyncResponse)
         self.client.add_ephemeral_callback(self._on_receipt, ReceiptEvent)
 
@@ -102,6 +115,19 @@ class UserIndexer:
         for receipt in event.receipts:
             if receipt.user_id == self.user_id:
                 update_read_marker(self.conn, room.room_id, receipt.timestamp)
+
+    async def _on_room_create(self, room: MatrixRoom, event: RoomCreateEvent):
+        """A room's type (whether it's a Space, i.e. a container of other
+        rooms) is fixed forever on its m.room.create event - nio doesn't
+        surface this on MatrixRoom itself, so it's captured here instead."""
+        if event.room_type == "m.space":
+            mark_space(self.conn, room.room_id)
+
+    async def _on_space_child(self, room: MatrixRoom, event: RoomSpaceChildEvent):
+        """m.space.child lives in the SPACE's own state, one event per
+        child room (event.state_key) - this is exactly the hierarchy
+        Element's own sidebar is built from."""
+        add_space_child(self.conn, room.room_id, event.state_key)
 
     async def _on_sync(self, response: SyncResponse):
         for room_id, room_info in response.rooms.join.items():
@@ -171,6 +197,11 @@ class UserIndexer:
         (e.g. after a key import) since inserts are idempotent on event_id."""
         log.info("[%s] performing full sync...", self.user_id)
         self.last_sync_attempt_at = time.time()
+        # Cleared up front rather than patched incrementally - a removed
+        # space/child relationship is only ever announced as a live event,
+        # never as an absence, so a full resync is treated as the
+        # authoritative current snapshot instead.
+        clear_space_children(self.conn)
         resp = await self.client.sync(timeout=30000, full_state=True)
         if isinstance(resp, SyncError):
             self.last_error = f"full sync failed (status={getattr(resp, 'status_code', '?')}): {resp}"

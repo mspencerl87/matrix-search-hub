@@ -237,6 +237,41 @@ Like the rest of the app, this only reflects the state of your own
 unlocked, currently-syncing session - a locked vault shows nothing here
 either, for the same reason `/api/status` and search don't work locked.
 
+## Rooms (Space hierarchy)
+
+A separate page (`/rooms.html`, linked next to **Unread** in the header)
+shows your rooms as a collapsible Space > room tree - the actual structure
+your homeserver's admins built, not Element's flattened/mixed sidebar.
+Expanding a space shows what's inside it, Teams-style; expand/collapse
+state is remembered per room in your browser (`localStorage`) so it stays
+how you left it between visits. A filter box narrows the tree to matching
+names, auto-expanding any space that contains a match.
+
+The hierarchy comes straight from Matrix's own space mechanism, not a
+guess:
+
+- A room is a **Space** (a container of other rooms, not something you
+  chat in directly) if its `m.room.create` event declared
+  `type: "m.space"` - this app captures that from the create event since
+  nio doesn't surface it as a queryable property itself.
+- A space's children come from its own `m.space.child` state events (one
+  per child room) - the exact mechanism Element's own sidebar hierarchy is
+  built from. This is rebuilt from scratch on every full resync rather
+  than patched incrementally, since a room being *removed* from a space is
+  only ever announced as a live event, never as an absence, so a fresh
+  full sync is treated as the authoritative current snapshot.
+- Each node shows an unread count (same source as the Unread page),
+  rolled up through a space so a collapsed header tells you whether
+  anything inside needs attention without expanding it.
+- **Direct messages are intentionally excluded** - Matrix's space concept
+  doesn't organize DMs at all, so they stay covered by the "Recent PMs"
+  sidebar and the Unread page's PM column instead.
+
+This is a navigation aid, not a chat client: clicking a room opens it in
+Element (or matrix.to) the same way every other link in this app does.
+Nothing here reads a room's live timeline, sends messages, or marks
+anything read.
+
 ## Setup
 
 1. Copy the env file:
@@ -520,6 +555,10 @@ was there before; **Remove logo** clears it back to no logo.
   user right now, computed from this account's own read-receipt position
   (see "Unread messages" above - not nio's per-device
   `unread_notifications`), each with a last-message preview and links into
+  Element/matrix.to; 423 if locked.
+- `GET /api/rooms-tree` — the logged-in user's non-DM rooms as a Space >
+  room hierarchy tree (see "Rooms (Space hierarchy)" above), each node
+  with an avatar, a rolled-up unread count, and links into
   Element/matrix.to; 423 if locked.
 - `POST /api/resync` — re-runs a full sync + backfill in the background
   for the logged-in user, without needing a key import. Useful if you
