@@ -35,6 +35,15 @@
   @media (max-width: 800px) {
     .columns { grid-template-columns: 1fr; }
   }
+  .column {
+    /* Grid items default to min-width:auto, which refuses to shrink below
+       the min-content width of a descendant - and a long, unbreakable
+       (white-space:nowrap) preview line has a huge min-content width. That
+       let this column balloon past its fair 1fr share instead of wrapping
+       its own content, which is what actually pushed the mark-read button
+       out of view. */
+    min-width: 0;
+  }
   .column h2 {
     font-size: 0.78rem;
     text-transform: uppercase;
