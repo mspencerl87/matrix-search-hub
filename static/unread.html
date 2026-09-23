@@ -65,20 +65,17 @@
   }
   .mark-read-btn {
     flex-shrink: 0;
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    border: 1px solid var(--border);
-    background: transparent;
-    color: var(--muted);
+    padding: 5px 12px;
+    border-radius: 999px;
+    border: 1px solid #0dbd8b55;
+    background: #0dbd8b1f;
+    color: var(--accent);
     cursor: pointer;
-    font-size: 0.85rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
+    font-size: 0.72rem;
+    font-weight: 600;
+    white-space: nowrap;
   }
-  .mark-read-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .mark-read-btn:hover { background: #0dbd8b3a; border-color: var(--accent); }
   .mark-read-btn:disabled { opacity: 0.5; cursor: default; }
   .conv-avatar {
     width: 40px;
@@ -175,7 +172,7 @@ function renderColumn(el, items, emptyLabel) {
         </span>
       </a>
       ${badges}
-      <button class="mark-read-btn" data-room-id="${escapeHtml(item.room_id)}" title="Mark as read">&#10003;</button>
+      <button class="mark-read-btn" data-room-id="${escapeHtml(item.room_id)}" title="Mark as read">Mark read</button>
     </div>`;
   }).join('');
 }
