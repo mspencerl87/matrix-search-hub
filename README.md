@@ -213,19 +213,18 @@ Counts come from this account's own read-receipt position, tracked from
 the receipt events Matrix sends this app's session (`m.read` and the
 *private* `m.read.private` variant - Element sends the private kind by
 default) for messages from anyone but yourself, compared against the
-account's own indexed messages. This app never sends read receipts on
-your behalf - reading a message in Element (or anywhere else, on any of
-your devices) is what clears it here too, on the next sync.
+account's own indexed messages. Reading a message in Element (or anywhere
+else, on any of your devices) clears it here too, on the next sync.
 
 This is *not* the same as nio's built-in
 `MatrixRoom.unread_notifications`/`unread_highlights` fields, and
 deliberately doesn't use them: those reflect this app's own bot device's
-read position specifically, and since this app never marks anything read
-on that device, they'd only ever grow - not what "unread" means to a
-human checking in each morning. A room with no read-receipt seen yet
-(e.g. one you've never opened since this feature shipped) is left out of
-the list entirely rather than shown as fully unread with no real
-baseline - open it once anywhere and it'll start being tracked.
+read position specifically, and since this app doesn't mark things read
+on that device *automatically*, they'd only ever grow - not what "unread"
+means to a human checking in each morning. A room with no read-receipt
+seen yet (e.g. one you've never opened since this feature shipped) is
+left out of the list entirely rather than shown as fully unread with no
+real baseline - open it once anywhere and it'll start being tracked.
 
 "Mentions" is a plain-text heuristic (your Matrix ID's localpart, or a
 literal `@room`, appearing as a whole word) rather than a true push-rule
@@ -233,9 +232,29 @@ evaluation, since this app has no access to your account's actual push
 rules - close to, but not exactly, what Element itself highlights.
 Rooms with a mention sort to the top.
 
-Like the rest of the app, this only reflects the state of your own
-unlocked, currently-syncing session - a locked vault shows nothing here
-either, for the same reason `/api/status` and search don't work locked.
+### Mark as read - the one thing in this app that writes anything
+
+Every other feature here is strictly read-only - this is the single
+exception, so it's worth being explicit about. Each conversation has a
+**mark as read** button, and there's a **Mark all as read** button in the
+header (with a confirmation prompt, since it can touch a lot of rooms at
+once). Clicking either sends a **real Matrix read receipt** (`m.read`),
+from this app's own session, for the newest message this app has indexed
+in that room.
+
+This is a genuine account-level action, not a local "hide it here"
+toggle: since it's a real receipt, it also clears the room's unread badge
+in Element (or any other client you use), not just on this page - because
+that's what actually solves "let me clean out my unread list in the
+morning without clicking through every room in Element individually."
+There's no "mark as unread" - Matrix itself doesn't really support putting
+a receipt back in time, so the only way back is to actually reread
+something, same as in Element.
+
+Like the rest of the app, this only reflects (and, here, acts on) the
+state of your own unlocked, currently-syncing session - a locked vault
+shows nothing here either, for the same reason `/api/status` and search
+don't work locked.
 
 ## Rooms (Space hierarchy)
 
@@ -563,6 +582,12 @@ was there before; **Remove logo** clears it back to no logo.
   (see "Unread messages" above - not nio's per-device
   `unread_notifications`), each with a last-message preview and links into
   Element/matrix.to; 423 if locked.
+- `POST /api/unread/{room_id}/mark-read` — sends a real `m.read` receipt
+  for the newest message this app has indexed in that room, from this
+  app's own session; 400 if nothing's indexed for that room to point the
+  receipt at, 423 if locked.
+- `POST /api/unread/mark-all-read` — the same, for every currently-unread
+  room; `{status, marked, total}`; 423 if locked.
 - `GET /api/rooms-tree` — the logged-in user's non-DM rooms as a Space >
   room hierarchy tree (see "Rooms (Space hierarchy)" above), each node
   with an avatar, a rolled-up unread count, and links into

@@ -13,6 +13,16 @@ def add_message(conn, event_id, room_id, room_name, sender, body, ts, commit=Tru
         conn.commit()
 
 
+def latest_event_id(conn, room_id: str) -> str | None:
+    """The most recent indexed message's event_id in a room, i.e. the event
+    a real Matrix read receipt should point at to mark it caught-up."""
+    row = conn.execute(
+        "SELECT event_id FROM messages WHERE room_id = ? ORDER BY origin_server_ts DESC LIMIT 1",
+        (room_id,),
+    ).fetchone()
+    return row[0] if row else None
+
+
 def _fts_query(raw: str) -> str:
     tokens = raw.split()
     escaped = ['"{}"'.format(t.replace('"', '""')) for t in tokens if t]

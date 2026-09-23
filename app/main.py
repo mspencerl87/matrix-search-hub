@@ -12,6 +12,8 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from nio import UpdateReceiptMarkerResponse
+
 from app import auth, branding, config, control_store, oidc, vault
 from app.search_index import (
     SORT_ORDERS,
@@ -19,11 +21,13 @@ from app.search_index import (
     clear_all,
     get_stats,
     last_message_by_room,
+    latest_event_id,
     list_rooms,
     recent_conversations,
     room_tree,
     search,
     unread_counts_by_room,
+    update_read_marker,
 )
 from app.worker_manager import WorkerManager, user_dir
 
@@ -412,6 +416,49 @@ async def api_unread(request: Request):
 
     items.sort(key=lambda i: (i["highlight_count"] <= 0, -(i["origin_server_ts"] or 0)))
     return {"unread": items}
+
+
+async def _mark_room_read(user_id: str, manager: WorkerManager, conn, room_id: str) -> bool:
+    """Sends a real m.read receipt, from this app's own Matrix session, for
+    the most recent message this app has indexed in the room. This is a
+    genuine account-level action - not a purely local "hide it here" toggle
+    - so it also clears the room in Element (or any other client), the same
+    as if you'd opened and read it there yourself."""
+    event_id = latest_event_id(conn, room_id)
+    if not event_id:
+        return False
+    try:
+        resp = await manager.indexers[user_id].client.update_receipt_marker(room_id, event_id)
+    except Exception:
+        log.exception("[%s] update_receipt_marker failed for %s", user_id, room_id)
+        return False
+    if not isinstance(resp, UpdateReceiptMarkerResponse):
+        return False
+    # Update our own tracked marker immediately rather than waiting for this
+    # receipt to echo back through a live sync's ephemeral events.
+    update_read_marker(conn, room_id, int(time.time() * 1000))
+    return True
+
+
+@app.post("/api/unread/{room_id}/mark-read")
+async def api_mark_read(request: Request, room_id: str):
+    user_id, manager = _require_unlocked(request)
+    conn = manager.vault_conns[user_id]
+    if not await _mark_room_read(user_id, manager, conn, room_id):
+        return JSONResponse({"error": "could not mark this room as read"}, status_code=400)
+    return {"status": "marked"}
+
+
+@app.post("/api/unread/mark-all-read")
+async def api_mark_all_read(request: Request):
+    user_id, manager = _require_unlocked(request)
+    conn = manager.vault_conns[user_id]
+    room_ids = list(unread_counts_by_room(conn, user_id).keys())
+    marked = 0
+    for room_id in room_ids:
+        if await _mark_room_read(user_id, manager, conn, room_id):
+            marked += 1
+    return {"status": "done", "marked": marked, "total": len(room_ids)}
 
 
 def _decorate_tree(nodes: list) -> list:

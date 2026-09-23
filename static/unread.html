@@ -51,11 +51,35 @@
     padding: 12px 14px;
     border: 1px solid var(--border);
     border-radius: 10px;
-    text-decoration: none;
-    color: var(--text);
     background: var(--panel);
   }
   .conversation-item:hover { border-color: var(--accent); }
+  .conv-link {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+    text-decoration: none;
+    color: var(--text);
+  }
+  .mark-read-btn {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+  .mark-read-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .mark-read-btn:disabled { opacity: 0.5; cursor: default; }
   .conv-avatar {
     width: 40px;
     height: 40px;
@@ -89,6 +113,8 @@
 <header>
   <h1>Unread</h1>
   <div>
+    <button class="link" id="markAllBtn">Mark all as read</button>
+    &middot;
     <button class="link" id="refreshBtn">Refresh</button>
     &middot;
     <a href="/">&larr; Back to search</a>
@@ -139,15 +165,18 @@ function renderColumn(el, items, emptyLabel) {
         ${item.highlight_count > 0 ? `<span class="pill highlight">${item.highlight_count} mention${item.highlight_count === 1 ? '' : 's'}</span>` : ''}
         <span class="pill count">${item.notification_count} unread</span>
       </span>`;
-    return `<a class="conversation-item" href="${item.element_url}" target="_blank" rel="noopener">
-      ${avatar}
-      <span class="conv-text">
-        <span class="conv-name">${escapeHtml(item.room_name)}</span>
-        <span class="conv-preview">${preview}</span>
-        <span class="conv-time">${date}</span>
-      </span>
+    return `<div class="conversation-item">
+      <a class="conv-link" href="${escapeHtml(item.element_url)}" target="_blank" rel="noopener">
+        ${avatar}
+        <span class="conv-text">
+          <span class="conv-name">${escapeHtml(item.room_name)}</span>
+          <span class="conv-preview">${preview}</span>
+          <span class="conv-time">${date}</span>
+        </span>
+      </a>
       ${badges}
-    </a>`;
+      <button class="mark-read-btn" data-room-id="${escapeHtml(item.room_id)}" title="Mark as read">&#10003;</button>
+    </div>`;
   }).join('');
 }
 
@@ -177,6 +206,46 @@ async function loadUnread() {
 }
 
 document.getElementById('refreshBtn').addEventListener('click', loadUnread);
+
+document.getElementById('columns').addEventListener('click', async (e) => {
+  const btn = e.target.closest('.mark-read-btn');
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/api/unread/${encodeURIComponent(btn.dataset.roomId)}/mark-read`, { method: 'POST' });
+    if (r.ok) {
+      btn.closest('.conversation-item').remove();
+      if (!document.getElementById('listDirect').querySelector('.conversation-item')) {
+        document.getElementById('listDirect').innerHTML = '<div class="column-empty">No unread PMs.</div>';
+      }
+      if (!document.getElementById('listRooms').querySelector('.conversation-item')) {
+        document.getElementById('listRooms').innerHTML = '<div class="column-empty">No unread rooms.</div>';
+      }
+      if (!document.querySelector('.conversation-item')) {
+        document.getElementById('columns').hidden = true;
+        document.getElementById('empty').hidden = false;
+      }
+    } else {
+      btn.disabled = false;
+    }
+  } catch (e) {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('markAllBtn').addEventListener('click', async () => {
+  if (!confirm('Mark every unread conversation as read?\n\nThis sends a real read receipt from this app, so it will also clear these in Element (or any other client) - not just here.')) {
+    return;
+  }
+  const markAllBtn = document.getElementById('markAllBtn');
+  markAllBtn.disabled = true;
+  try {
+    await fetch('/api/unread/mark-all-read', { method: 'POST' });
+    await loadUnread();
+  } finally {
+    markAllBtn.disabled = false;
+  }
+});
 
 loadUnread();
 setInterval(loadUnread, 20000);
