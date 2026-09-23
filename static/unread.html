@@ -204,44 +204,64 @@ async function loadUnread() {
 
 document.getElementById('refreshBtn').addEventListener('click', loadUnread);
 
-document.getElementById('columns').addEventListener('click', async (e) => {
-  const btn = e.target.closest('.mark-read-btn');
-  if (!btn || btn.disabled) return;
+function removeConversationRow(btn) {
+  const item = btn.closest('.conversation-item');
+  if (item) item.remove();
+  if (!document.getElementById('listDirect').querySelector('.conversation-item')) {
+    document.getElementById('listDirect').innerHTML = '<div class="column-empty">No unread PMs.</div>';
+  }
+  if (!document.getElementById('listRooms').querySelector('.conversation-item')) {
+    document.getElementById('listRooms').innerHTML = '<div class="column-empty">No unread rooms.</div>';
+  }
+  if (!document.querySelector('.conversation-item')) {
+    document.getElementById('columns').hidden = true;
+    document.getElementById('empty').hidden = false;
+  }
+}
+
+async function markRoomRead(btn) {
   btn.disabled = true;
   try {
     const r = await fetch(`/api/unread/${encodeURIComponent(btn.dataset.roomId)}/mark-read`, { method: 'POST' });
     if (r.ok) {
-      btn.closest('.conversation-item').remove();
-      if (!document.getElementById('listDirect').querySelector('.conversation-item')) {
-        document.getElementById('listDirect').innerHTML = '<div class="column-empty">No unread PMs.</div>';
-      }
-      if (!document.getElementById('listRooms').querySelector('.conversation-item')) {
-        document.getElementById('listRooms').innerHTML = '<div class="column-empty">No unread rooms.</div>';
-      }
-      if (!document.querySelector('.conversation-item')) {
-        document.getElementById('columns').hidden = true;
-        document.getElementById('empty').hidden = false;
-      }
-    } else {
-      btn.disabled = false;
+      removeConversationRow(btn);
+      return true;
     }
+    btn.disabled = false;
+    return false;
   } catch (e) {
     btn.disabled = false;
+    return false;
   }
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+document.getElementById('columns').addEventListener('click', (e) => {
+  const btn = e.target.closest('.mark-read-btn');
+  if (!btn || btn.disabled) return;
+  markRoomRead(btn);
 });
 
 document.getElementById('markAllBtn').addEventListener('click', async () => {
-  if (!confirm('Mark every unread conversation as read?\n\nThis sends a real read receipt from this app, so it will also clear these in Element (or any other client) - not just here.')) {
+  const buttons = Array.from(document.querySelectorAll('.mark-read-btn')).filter(b => !b.disabled);
+  if (!buttons.length) return;
+  if (!confirm(`Mark all ${buttons.length} unread conversation(s) as read?\n\nThis sends a real read receipt from this app, one conversation at a time, so it will also clear these in Element (or any other client) - not just here.`)) {
     return;
   }
   const markAllBtn = document.getElementById('markAllBtn');
   markAllBtn.disabled = true;
-  try {
-    await fetch('/api/unread/mark-all-read', { method: 'POST' });
-    await loadUnread();
-  } finally {
-    markAllBtn.disabled = false;
+  const originalLabel = markAllBtn.textContent;
+  for (let i = 0; i < buttons.length; i++) {
+    markAllBtn.textContent = `Marking read (${i + 1}/${buttons.length})...`;
+    await markRoomRead(buttons[i]);
+    if (i < buttons.length - 1) await sleep(300);
   }
+  markAllBtn.textContent = originalLabel;
+  markAllBtn.disabled = false;
+  await loadUnread();
 });
 
 loadUnread();

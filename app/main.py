@@ -449,15 +449,23 @@ async def api_mark_read(request: Request, room_id: str):
     return {"status": "marked"}
 
 
+MARK_ALL_READ_DELAY_SECONDS = 0.3
+
+
 @app.post("/api/unread/mark-all-read")
 async def api_mark_all_read(request: Request):
+    """One room at a time, not concurrently - each is its own request to
+    the homeserver, and a small pause between them keeps a large unread
+    list from firing a burst of back-to-back requests at it."""
     user_id, manager = _require_unlocked(request)
     conn = manager.vault_conns[user_id]
     room_ids = list(unread_counts_by_room(conn, user_id).keys())
     marked = 0
-    for room_id in room_ids:
+    for i, room_id in enumerate(room_ids):
         if await _mark_room_read(user_id, manager, conn, room_id):
             marked += 1
+        if i < len(room_ids) - 1:
+            await asyncio.sleep(MARK_ALL_READ_DELAY_SECONDS)
     return {"status": "done", "marked": marked, "total": len(room_ids)}
 
 

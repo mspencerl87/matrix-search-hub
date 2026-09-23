@@ -251,6 +251,12 @@ There's no "mark as unread" - Matrix itself doesn't really support putting
 a receipt back in time, so the only way back is to actually reread
 something, same as in Element.
 
+**Mark all as read** does exactly that, one conversation at a time (never
+concurrently), with a short pause between each and a live "(3/12)"-style
+progress label on the button - deliberately not a single burst of
+simultaneous requests, so it doesn't hammer your homeserver with everyone's
+unread count added together at once.
+
 Like the rest of the app, this only reflects (and, here, acts on) the
 state of your own unlocked, currently-syncing session - a locked vault
 shows nothing here either, for the same reason `/api/status` and search
