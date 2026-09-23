@@ -46,22 +46,31 @@
   .conversation-list { display: flex; flex-direction: column; gap: 8px; }
   .conversation-item {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 12px;
+    gap: 8px 12px;
     padding: 12px 14px;
     border: 1px solid var(--border);
     border-radius: 10px;
     background: var(--panel);
+    overflow: hidden;
   }
   .conversation-item:hover { border-color: var(--accent); }
   .conv-link {
     display: flex;
     align-items: center;
     gap: 12px;
-    flex: 1;
+    flex: 1 1 200px;
     min-width: 0;
     text-decoration: none;
     color: var(--text);
+  }
+  .conv-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    margin-left: auto;
   }
   .mark-read-btn {
     flex-shrink: 0;
@@ -171,8 +180,10 @@ function renderColumn(el, items, emptyLabel) {
           <span class="conv-time">${date}</span>
         </span>
       </a>
-      ${badges}
-      <button class="mark-read-btn" data-room-id="${escapeHtml(item.room_id)}" title="Mark as read">Mark read</button>
+      <span class="conv-actions">
+        ${badges}
+        <button class="mark-read-btn" data-room-id="${escapeHtml(item.room_id)}" title="Mark as read">Mark read</button>
+      </span>
     </div>`;
   }).join('');
 }
