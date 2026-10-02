@@ -1,5 +1,6 @@
 import os
 import sqlite3
+import tempfile
 
 import pytest
 
@@ -7,6 +8,9 @@ import pytest
 os.environ.setdefault("MATRIX_HOMESERVER", "https://matrix.example.test")
 os.environ.setdefault("BASE_URL", "https://search.example.test")
 os.environ.setdefault("SESSION_SECRET", "test-only-session-secret")
+# app.main creates DATA_DIR/branding at import time, and the default (/data)
+# isn't writable outside the container.
+os.environ.setdefault("DATA_DIR", tempfile.mkdtemp(prefix="matrix-search-hub-tests-"))
 
 
 SEARCH_SCHEMA = """

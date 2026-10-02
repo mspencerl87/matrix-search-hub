@@ -118,6 +118,17 @@ both:
   rekeys the vault in place with no data loss. This is different from a
   forgotten passphrase, which nobody, including an admin, can recover or
   reset (see the Admin panel section).
+- **"Your Matrix session could not be renewed, please sign in again"** on
+  unlock means the stored Matrix login can't be refreshed any more (it was
+  revoked, e.g. the device was signed out in Element's Sessions list, or it
+  simply expired) - the vault and its index are fine. Click **Sign in
+  again**, authenticate, then enter your passphrase on the unlock screen:
+  the fresh login is moved into your existing vault, so nothing is lost and
+  nobody needs to be deprovisioned. Because a new login is a new Matrix
+  device, historical *encrypted* rooms need your Element key export
+  re-imported (and the new session verified) the same as on first setup.
+  Do the unlock within 15 minutes of signing in - the fresh login is only
+  held in memory until then.
 
 ## Search range & retention
 
@@ -498,7 +509,9 @@ It shows, and only shows, metadata:
   and Matrix crypto store. Requires typing their user ID to confirm; there
   is no undo. Use this for offboarding, **and** for a forgotten passphrase -
   there is no way to reset or recover a passphrase without knowing the
-  current one (see below), so starting over is the only option.
+  current one (see below), so starting over is the only option. It is *not*
+  needed for "your Matrix session could not be renewed" - that has a
+  non-destructive fix (see "What this means day to day").
 
 There is deliberately no way for an admin to read a user's messages or
 open their vault without their passphrase - that would defeat the entire

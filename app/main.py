@@ -242,26 +242,45 @@ async def api_vault_unlock(request: Request, body: PassphraseBody):
         conn.close()
         return JSONResponse({"error": "vault has no stored session, contact an admin"}, status_code=500)
 
+    device_id = record["device_id"]
     access_token = record["access_token"]
     if (record.get("expires_at") or 0) - time.time() < config.TOKEN_REFRESH_MARGIN_SECONDS:
-        if not record.get("refresh_token"):
-            conn.close()
-            return JSONResponse({"error": "your Matrix session has expired, please sign in again"}, status_code=401)
-        try:
-            body_resp = await oidc.refresh_token(
-                app_state["http_session"], app_state["discovery"], app_state["client_id"], app_state["client_secret"],
-                record["refresh_token"],
-            )
-        except oidc.OIDCError:
-            conn.close()
-            return JSONResponse({"error": "your Matrix session could not be renewed, please sign in again"}, status_code=401)
-        access_token = body_resp["access_token"]
-        new_refresh = body_resp.get("refresh_token", record["refresh_token"])
-        new_expires_at = time.time() + body_resp.get("expires_in", 300)
-        vault.set_oauth(conn, record["device_id"], access_token, new_refresh, new_expires_at)
+        refreshed = None
+        if record.get("refresh_token"):
+            try:
+                refreshed = await oidc.refresh_token(
+                    app_state["http_session"], app_state["discovery"], app_state["client_id"],
+                    app_state["client_secret"], record["refresh_token"],
+                )
+            except oidc.OIDCError as e:
+                log.warning("Stored Matrix session for %s could not be renewed: %s", user_id, e)
+
+        if refreshed:
+            access_token = refreshed["access_token"]
+            new_refresh = refreshed.get("refresh_token", record["refresh_token"])
+            new_expires_at = time.time() + refreshed.get("expires_in", 300)
+            vault.set_oauth(conn, device_id, access_token, new_refresh, new_expires_at)
+        else:
+            # The stored session is dead (revoked, expired, or signed out from
+            # another client). If the user has just signed in again, adopt that
+            # fresh session into this vault instead of making them deprovision
+            # and lose their index - the passphrase they just entered already
+            # proved they own it. The new login is a new Matrix device, so
+            # encrypted history needs a key re-import, but the index is kept.
+            pending = auth.pop_pending_tokens(user_id)
+            if not pending:
+                conn.close()
+                return JSONResponse(
+                    {"error": "your Matrix session could not be renewed, please sign in again", "needs_reauth": True},
+                    status_code=401,
+                )
+            device_id = pending["device_id"]
+            access_token = pending["access_token"]
+            vault.set_oauth(conn, device_id, access_token, pending["refresh_token"], pending["expires_at"])
+            log.info("Adopted a fresh Matrix session for %s (new device %s)", user_id, device_id)
 
     manager: WorkerManager = app_state["manager"]
-    await manager.start_user(user_id, record["device_id"], conn, access_token)
+    await manager.start_user(user_id, device_id, conn, access_token)
     return {"status": "unlocked"}
 
 

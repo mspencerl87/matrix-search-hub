@@ -205,6 +205,8 @@
     <button type="submit">Unlock</button>
   </form>
   <div class="field-error" id="unlockError"></div>
+  <a class="btn" id="reauthLink" href="/auth/login" hidden>Sign in again</a>
+  <p id="reauthHelp" hidden>Your index is safe. Sign in again, then come back here and enter your passphrase to reconnect it.</p>
 </div>
 
 <div id="app" hidden>
@@ -570,6 +572,8 @@ document.getElementById('unlockForm').addEventListener('submit', async (e) => {
   const pass = document.getElementById('unlockPass').value;
   const errEl = document.getElementById('unlockError');
   errEl.textContent = '';
+  document.getElementById('reauthLink').hidden = true;
+  document.getElementById('reauthHelp').hidden = true;
   try {
     const r = await fetch('/api/vault/unlock', {
       method: 'POST',
@@ -577,7 +581,12 @@ document.getElementById('unlockForm').addEventListener('submit', async (e) => {
       body: JSON.stringify({ passphrase: pass }),
     });
     const j = await r.json();
-    if (!r.ok) { errEl.textContent = j.error || 'Unlock failed.'; return; }
+    if (!r.ok) {
+      errEl.textContent = j.error || 'Unlock failed.';
+      document.getElementById('reauthLink').hidden = !j.needs_reauth;
+      document.getElementById('reauthHelp').hidden = !j.needs_reauth;
+      return;
+    }
     await enterApp();
   } catch (e) {
     errEl.textContent = 'Unlock failed.';
