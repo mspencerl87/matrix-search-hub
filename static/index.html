@@ -104,11 +104,12 @@
     color: var(--text);
     font-size: 0.9rem;
   }
-  input[type="text"] { flex: 1 1 180px; min-width: 0; }
+  input[type="text"] { flex: 1 1 140px; min-width: 0; }
   /* A <select> sizes itself to its widest option, and a flex item won't
      shrink below that - so one very long room name used to stretch the whole
-     search bar out over the sidebars. Fixed width + ellipsis keeps it put. */
-  #roomFilter { flex: 0 1 220px; width: 220px; min-width: 0; text-overflow: ellipsis; }
+     search bar out over the sidebars. Fixed width + ellipsis keeps it put,
+     and is narrow enough that the whole bar fits one row in the center column. */
+  #roomFilter { flex: 0 1 170px; width: 170px; min-width: 0; text-overflow: ellipsis; }
   input[type="text"]:focus, input[type="password"]:focus { outline: 2px solid var(--accent); }
   button, .btn {
     padding: 12px 18px;
@@ -281,7 +282,7 @@
   </details>
 </header>
 <main>
-  <div id="results" class="empty">Type something and hit search.</div>
+  <div id="results"><div class="empty">Type something and hit search.</div></div>
 </main>
 </div>
 <aside class="side-panel side-right">
