@@ -10,20 +10,36 @@ can read it without that user's own passphrase.
 
 ## Screenshots
 
+*Every screenshot below uses made-up data - an invented "Acme" org with
+fictional people, rooms and messages. No real conversations are shown.*
+
 <table>
 <tr>
-<td><img src="docs/screenshots/sign-in.png" width="380" alt="Sign-in screen"><br>Sign in</td>
+<td><img src="docs/screenshots/sign-in.png" width="380" alt="Sign-in screen with a company logo"><br>Sign in (shows your company's logo, set from the admin panel)</td>
 <td><img src="docs/screenshots/unlock.png" width="380" alt="Vault unlock screen"><br>Unlock (after a restart)</td>
-</tr>
-<tr>
-<td><img src="docs/screenshots/search.png" width="380" alt="Search UI with range, sort, and room filters"><br>Search - range/sort/room filters, resync, key import, passphrase change</td>
-<td><img src="docs/screenshots/search-results.png" width="380" alt="Search results with highlighted matches"><br>Results with highlighted matches (redacted for this README)</td>
 </tr>
 </table>
 
-<img src="docs/screenshots/admin-panel.png" width="780" alt="Admin panel showing overview and per-user sync health">
+<img src="docs/screenshots/search-results.png" width="780" alt="Search results with highlighted matches, filters, org-wide stats, and recent PMs and rooms with avatars on either side">
 
-*Admin panel - deployment overview and per-user sync health (redacted for this README).*
+*Search - highlighted matches, room/range/sort filters, org-wide usage
+stats, and your most recent PMs and rooms (with avatars) on either side.*
+
+<img src="docs/screenshots/unread.png" width="780" alt="Unread page split into PMs and rooms, with mention badges and a Mark read button on every conversation">
+
+*Unread - everything waiting for you in one place, split into PMs and
+rooms, mentions first, with a Mark read button per conversation (or Mark
+all as read).*
+
+<img src="docs/screenshots/rooms.png" width="460" alt="Rooms page showing the Space hierarchy as a collapsible tree with unread counts">
+
+*Rooms - your Space hierarchy as a collapsible tree, with unread counts
+rolled up so a collapsed space shows whether anything inside needs you.*
+
+<img src="docs/screenshots/admin-panel.png" width="780" alt="Admin panel showing overview, branding, admins, and per-user sync health">
+
+*Admin panel - deployment overview, logo upload, admin list, and per-user
+vault state and sync health (metadata only, never anyone's messages).*
 
 ## How login works
 
